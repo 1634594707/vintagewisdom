@@ -1,0 +1,67 @@
+app:
+  name: "VintageWisdom"
+  version: "0.1.0"
+  debug: false
+
+storage:
+  database_path: "data/vintagewisdom.db"
+  vector_index_path: "data/vectors"
+  graph_path: "data/graph"
+  backup_enabled: true
+  backup_interval: "daily"
+
+kg:
+  store: "sqlite"  # sqlite | neo4j
+  neo4j:
+    uri: "bolt://127.0.0.1:7687"
+    user: "neo4j"
+    password: ""
+    database: "neo4j"
+  redis:
+    url: "redis://127.0.0.1:6379/0"
+    ttl_seconds: 300
+  hot_index:
+    refresh_seconds: 60
+
+graphrag:
+  enabled: true
+  qdrant:
+    url: "http://127.0.0.1:6333"
+    collection: "vw_case_chunks"
+    vector_size: 1024
+  embedding:
+    provider: "ollama" # ollama | api
+    model: "nomic-embed-text"
+    api_base: ""
+    api_key: ""
+  chunking:
+    max_chars: 1400
+    overlap_chars: 200
+  retrieval:
+    top_k: 20
+
+retrieval:
+  top_k: 5
+
+nlp:
+  embedding_model: "paraphrase-multilingual-MiniLM-L12-v2"
+  spacy_model_zh: "zh_core_web_sm"
+  spacy_model_en: "en_core_web_sm"
+  max_sequence_length: 512
+
+aio:
+  local_model: "phi-3-mini"
+  use_cloud: false
+  cloud_model: "gpt-4"
+  redteam_enabled: true
+  future_self_enabled: true
+
+bias_detection:
+  confirmation_bias_threshold: 0.7
+  planning_fallacy_threshold: 1.5
+  emotion_check_enabled: true
+
+plugins:
+  user_dir: "./plugins"
+  disabled: []
+  config: {}
