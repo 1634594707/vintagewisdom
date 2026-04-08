@@ -86,8 +86,8 @@ class AIRedTeamLLMPlugin(Plugin):
         try:
             cfg = self.app.config
             self._llm = LLMService(
-                provider=cfg.get("ai.provider", "ollama"),
-                model=cfg.get("ai.model", "qwen3.5:4b"),
+                provider=cfg.get("ai.provider", "api"),
+                model=cfg.get("ai.model", "gpt-4.1-mini"),
                 api_key=cfg.get("ai.api_key", ""),
                 api_base=cfg.get("ai.api_base", ""),
                 timeout_s=int(cfg.get("ai.timeout_s", 30) or 30),

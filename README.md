@@ -60,7 +60,7 @@ vw init
 ## 启动 API
 
 ```bash
-python -m uvicorn vintagewisdom.web.app:create_app --factory --host 0.0.0.0 --port 8000
+python3 -m uvicorn vintagewisdom.web.app:create_app --factory --host 0.0.0.0 --port 8000
 ```
 
 常用地址：

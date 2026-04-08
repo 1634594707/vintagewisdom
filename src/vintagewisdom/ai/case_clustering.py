@@ -1,44 +1,16 @@
 """
-AI 案例聚类和关联分析模块
-使用本地大模型进行语义聚类和相似度计算
+案例聚类和关联分析模块（无本地模型依赖）。
 """
 
-import json
-import urllib.request
 from typing import Dict, List, Optional, Tuple
-import re
 
 
 class CaseClustering:
-    """使用 AI 进行案例聚类和关联分析"""
+    """基于规则进行案例聚类和关联分析"""
     
-    def __init__(self, model: str = "deepseek-r1:7b", base_url: str = "http://localhost:11434"):
+    def __init__(self, model: str = "gpt-4.1-mini", base_url: str = ""):
         self.model = model
         self.base_url = base_url
-        self.api_url = f"{base_url}/api/generate"
-    
-    def _call_ollama(self, prompt: str, timeout: int = 60) -> Optional[str]:
-        """调用 Ollama API"""
-        try:
-            data = json.dumps({
-                "model": self.model,
-                "prompt": prompt,
-                "stream": False
-            }).encode('utf-8')
-            
-            req = urllib.request.Request(
-                self.api_url,
-                data=data,
-                headers={'Content-Type': 'application/json'},
-                method='POST'
-            )
-            
-            with urllib.request.urlopen(req, timeout=timeout) as response:
-                result = json.loads(response.read().decode('utf-8'))
-                return result.get('response', '')
-        except Exception as e:
-            print(f"Ollama API call failed: {e}")
-            return None
     
     def extract_case_features(self, case: Dict) -> Dict:
         """提取案例特征用于聚类"""
@@ -95,27 +67,7 @@ class CaseClustering:
 相似度: 85
 原因: 两者都是投资交易中因过度自信和缺乏风控导致的爆仓案例"""
 
-        response = self._call_ollama(prompt, timeout=30)
-        
-        if not response:
-            # 如果 AI 调用失败，回退到基于 domain 的简单计算
-            return self._fallback_similarity(case1, case2)
-        
-        # 解析响应
-        similarity = 0.5
-        reasons = []
-        
-        # 提取相似度数字
-        match = re.search(r'相似度[:：]\s*(\d+)', response)
-        if match:
-            similarity = int(match.group(1)) / 100
-        
-        # 提取原因
-        reason_match = re.search(r'原因[:：]\s*(.+?)(?:\n|$)', response)
-        if reason_match:
-            reasons.append(reason_match.group(1).strip())
-        
-        return round(similarity, 2), reasons
+        return self._fallback_similarity(case1, case2)
     
     def _fallback_similarity(self, case1: Dict, case2: Dict) -> Tuple[float, List[str]]:
         """当 AI 不可用时，使用基于 domain 的简单相似度计算"""
@@ -184,37 +136,9 @@ class CaseClustering:
 [2]: 70
 原因: 都涉及高杠杆和缺乏风控的问题"""
 
-        response = self._call_ollama(prompt, timeout=60)
-        
-        results = []
-        if response:
-            # 解析响应
-            pattern = r'\[(\d+)\][:：]\s*(\d+)'
-            matches = re.findall(pattern, response)
-            
-            for idx_str, score_str in matches:
-                idx = int(idx_str)
-                score = int(score_str) / 100
-                
-                if idx < len(candidate_cases) and score >= threshold:
-                    case = candidate_cases[idx]
-                    
-                    # 提取该案例的原因
-                    case_pattern = rf'\[{idx}\][:：]\s*\d+\s*原因[:：](.+?)(?=\[|$)'
-                    case_match = re.search(case_pattern, response, re.DOTALL)
-                    reason = case_match.group(1).strip() if case_match else "AI分析相似"
-                    
-                    results.append({
-                        'case_id': case.get('id', ''),
-                        'similarity': round(score, 2),
-                        'reasons': [reason]
-                    })
-        
-        # 如果 AI 没有返回结果，回退到传统方法
-        if not results:
-            from ..knowledge.domains import find_similar_cases
-            all_cases_dict = [{**c, 'id': c.get('id', '')} for c in candidate_cases]
-            results = find_similar_cases(all_cases_dict, target_case, threshold)
+        from ..knowledge.domains import find_similar_cases
+        all_cases_dict = [{**c, 'id': c.get('id', '')} for c in candidate_cases]
+        results = find_similar_cases(all_cases_dict, target_case, threshold)
         
         # 排序并限制数量
         results.sort(key=lambda x: x['similarity'], reverse=True)
@@ -271,46 +195,35 @@ class CaseClustering:
 案例: 1, 3
 主题: 技术系统架构设计不当导致的故障和损失"""
 
-        response = self._call_ollama(prompt, timeout=60)
-        
         clusters = []
-        if response:
-            # 解析聚类结果
-            cluster_pattern = r'聚类\d+[:：]\s*(.+?)\n案例[:：]\s*([\d,\s]+)\n主题[:：]\s*(.+?)(?=\n\n聚类|\Z)'
-            matches = re.findall(cluster_pattern, response, re.DOTALL)
-            
-            for i, (name, case_nums, theme) in enumerate(matches):
-                case_indices = [int(x.strip()) for x in case_nums.split(',') if x.strip().isdigit()]
-                case_ids = [cases[idx].get('id', '') for idx in case_indices if idx < len(cases)]
-                
-                if len(case_ids) >= min_cluster_size:
-                    clusters.append({
-                        'cluster_id': f'cluster_{i}',
-                        'cluster_name': name.strip(),
-                        'cases': case_ids,
-                        'theme': theme.strip()
-                    })
+        grouped: Dict[str, List[str]] = {}
+        for c in cases:
+            domain = str(c.get("domain") or "general")
+            grouped.setdefault(domain, []).append(str(c.get("id") or ""))
+
+        for i, (domain, ids) in enumerate(grouped.items()):
+            ids = [x for x in ids if x]
+            if len(ids) >= min_cluster_size:
+                clusters.append(
+                    {
+                        "cluster_id": f"cluster_{i}",
+                        "cluster_name": f"{domain} 类",
+                        "cases": ids,
+                        "theme": f"{domain} 领域相近案例聚合",
+                    }
+                )
         
         return clusters
     
     def check_available(self) -> bool:
-        """检查 Ollama 是否可用"""
-        try:
-            req = urllib.request.Request(
-                f"{self.base_url}/api/tags",
-                method='GET'
-            )
-            with urllib.request.urlopen(req, timeout=5) as response:
-                return response.status == 200
-        except:
-            return False
+        return True
 
 
 # 全局聚类器实例
 _clustering: Optional[CaseClustering] = None
 
 
-def get_clustering_engine(model: str = "deepseek-r1:7b") -> Optional[CaseClustering]:
+def get_clustering_engine(model: str = "gpt-4.1-mini") -> Optional[CaseClustering]:
     """获取聚类引擎实例"""
     global _clustering
     if _clustering is None:

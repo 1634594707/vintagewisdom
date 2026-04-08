@@ -8,8 +8,8 @@ import { api } from "@/lib/api";
 
 export default function SettingsPage() {
   const [aiConfig, setAiConfig] = useState({
-    provider: "ollama",
-    model: "qwen3.5:4b",
+    provider: "api",
+    model: "gpt-4.1-mini",
     api_base: "",
     api_key: "",
   });
@@ -25,8 +25,8 @@ export default function SettingsPage() {
     api.getAIConfig().then((config) => {
       setAiConfig((prev) => ({
         ...prev,
-        provider: config.provider || "ollama",
-        model: config.model || "qwen3.5:4b",
+        provider: "api",
+        model: config.model || "gpt-4.1-mini",
         api_base: config.api_base || "",
       }));
     }).catch((e) => console.error("Failed to load AI config:", e));
@@ -35,7 +35,7 @@ export default function SettingsPage() {
       setAiStatus(status);
     }).catch((e) => {
       console.error("Failed to load AI status:", e);
-      setAiStatus({ available: false, provider: "ollama", model: "qwen3.5:4b" });
+      setAiStatus({ available: false, provider: "api", model: "gpt-4.1-mini" });
     });
   }, []);
 
@@ -84,26 +84,19 @@ export default function SettingsPage() {
           <PanelBlock eyebrow="配置面板" title="AI 提供方设置">
             <div className="space-y-4">
               <FieldGroup label="提供方">
-                <select value={aiConfig.provider} onChange={(e) => setAiConfig({ ...aiConfig, provider: e.target.value })} className="vw-select h-11 rounded-2xl px-4 text-sm">
-                  <option value="ollama">本地 Ollama</option>
-                  <option value="api">远程 API</option>
-                </select>
+                <input type="text" value="远程 API" disabled className="vw-input h-11 rounded-2xl px-4 text-sm opacity-70" />
               </FieldGroup>
 
-              <FieldGroup label="模型名称" hint={aiConfig.provider === "ollama" ? "例如：qwen3.5:4b、deepseek-r1:7b" : "例如：gpt-4.1、gpt-4o-mini"}>
+              <FieldGroup label="模型名称" hint="例如：gpt-4.1、gpt-4o-mini">
                 <input type="text" value={aiConfig.model} onChange={(e) => setAiConfig({ ...aiConfig, model: e.target.value })} className="vw-input h-11 rounded-2xl px-4 text-sm" />
               </FieldGroup>
 
-              {aiConfig.provider === "api" ? (
-                <>
-                  <FieldGroup label="API Base URL" hint="例如：https://api.openai.com/v1">
-                    <input type="text" value={aiConfig.api_base} onChange={(e) => setAiConfig({ ...aiConfig, api_base: e.target.value })} className="vw-input h-11 rounded-2xl px-4 text-sm" />
-                  </FieldGroup>
-                  <FieldGroup label="API Key" hint="仅用于本地运行时，不会展示给其他用户。">
-                    <input type="password" value={aiConfig.api_key} onChange={(e) => setAiConfig({ ...aiConfig, api_key: e.target.value })} placeholder="sk-..." className="vw-input h-11 rounded-2xl px-4 text-sm" />
-                  </FieldGroup>
-                </>
-              ) : null}
+              <FieldGroup label="API Base URL" hint="例如：https://api.openai.com/v1">
+                <input type="text" value={aiConfig.api_base} onChange={(e) => setAiConfig({ ...aiConfig, api_base: e.target.value })} className="vw-input h-11 rounded-2xl px-4 text-sm" />
+              </FieldGroup>
+              <FieldGroup label="API Key" hint="仅用于服务端配置保存，不会在页面回显。">
+                <input type="password" value={aiConfig.api_key} onChange={(e) => setAiConfig({ ...aiConfig, api_key: e.target.value })} placeholder="sk-..." className="vw-input h-11 rounded-2xl px-4 text-sm" />
+              </FieldGroup>
 
               <div className="flex flex-wrap items-center gap-3 pt-2">
                 <button type="button" onClick={handleSave} disabled={loading} className="vw-btn-primary px-5 py-2.5 text-sm font-medium disabled:opacity-60">
@@ -124,8 +117,7 @@ export default function SettingsPage() {
 
             <PanelBlock eyebrow="操作提示" title="使用建议">
               <div className="mt-4 space-y-3 text-sm leading-6 text-[var(--text-secondary)]">
-                <NoteItem title="本地 Ollama" description="适合离线和隐私优先场景，不需要 API Key，但本地模型服务必须保持运行。" />
-                <NoteItem title="远程 API" description="适合需要更强托管模型时使用，务必同时确保 Base URL 与凭证正确。" />
+                <NoteItem title="远程 API" description="线上部署建议固定使用托管模型服务，确保 Base URL 与凭证正确。" />
                 <NoteItem title="即时生效" description="保存后，新发起的查询和自动分类任务会立刻使用最新配置。" />
               </div>
             </PanelBlock>

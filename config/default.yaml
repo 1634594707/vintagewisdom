@@ -30,8 +30,8 @@ graphrag:
     collection: "vw_case_chunks"
     vector_size: 1024
   embedding:
-    provider: "ollama"
-    model: "nomic-embed-text"
+    provider: "api"
+    model: "text-embedding-3-small"
     api_base: ""
     api_key: ""
   chunking:
@@ -41,8 +41,8 @@ graphrag:
     top_k: 20
 
 ai:
-  provider: "ollama"
-  model: "deepseek-r1:7b"
+  provider: "api"
+  model: "gpt-4.1-mini"
   api_base: ""
   api_key: ""
   timeout_s: 30

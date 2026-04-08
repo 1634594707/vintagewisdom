@@ -10,39 +10,20 @@ class EmbeddingClient:
     def __init__(
         self,
         *,
-        provider: str = "ollama",  # ollama | api
-        model: str = "nomic-embed-text",
+        provider: str = "api",
+        model: str = "text-embedding-3-small",
         api_base: Optional[str] = None,
         api_key: Optional[str] = None,
-        ollama_base: str = "http://127.0.0.1:11434",
         timeout_seconds: int = 45,
     ):
-        self.provider = (provider or "ollama").strip().lower()
+        self.provider = (provider or "api").strip().lower()
         self.model = model
         self.api_base = api_base or os.getenv("EMBEDDING_API_BASE", "")
         self.api_key = api_key or os.getenv("EMBEDDING_API_KEY", "")
-        self.ollama_base = ollama_base
         self.timeout_seconds = int(timeout_seconds)
 
     def embed(self, text: str) -> List[float]:
-        if self.provider == "api":
-            return self._embed_api(text)
-        return self._embed_ollama(text)
-
-    def _embed_ollama(self, text: str) -> List[float]:
-        payload = json.dumps({"model": self.model, "prompt": text}).encode("utf-8")
-        req = urllib.request.Request(
-            f"{self.ollama_base}/api/embeddings",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        v = data.get("embedding")
-        if not isinstance(v, list):
-            return []
-        return [float(x) for x in v]
+        return self._embed_api(text)
 
     def _embed_api(self, text: str) -> List[float]:
         if not self.api_base or not self.api_key:

@@ -10,31 +10,21 @@ class LLMService:
     def __init__(
         self,
         *,
-        provider: str = "ollama",
-        model: str = "qwen3.5:4b",
+        provider: str = "api",
+        model: str = "gpt-4.1-mini",
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
         timeout_s: int = 30,
         retries: int = 1,
     ) -> None:
-        self.provider = (provider or "ollama").lower()
-        self.model = model or "qwen3.5:4b"
+        self.provider = (provider or "api").lower()
+        self.model = model or "gpt-4.1-mini"
         self.api_key = api_key or os.getenv("AI_API_KEY", "")
         self.api_base = api_base or os.getenv("AI_API_BASE", "")
         self.timeout_s = int(timeout_s or 30)
         self.retries = max(0, int(retries or 0))
 
     def check_available(self) -> bool:
-        if self.provider == "ollama":
-            try:
-                req = urllib.request.Request(
-                    self._ollama_url("/api/tags"),
-                    method="GET",
-                )
-                with urllib.request.urlopen(req, timeout=5) as response:
-                    return response.status == 200
-            except Exception:
-                return False
         if self.provider == "api":
             return bool(self.api_key and self.api_base)
         return False
@@ -58,13 +48,6 @@ class LLMService:
         last_err: Optional[Exception] = None
         for _ in range(self.retries + 1):
             try:
-                if self.provider == "ollama":
-                    return self._ollama_generate(
-                        prompt=prompt,
-                        model=model or self.model,
-                        temperature=temperature,
-                        timeout_s=timeout,
-                    )
                 if self.provider == "api":
                     return self._api_chat(
                         messages=[{"role": "user", "content": prompt}],
@@ -96,13 +79,6 @@ class LLMService:
         last_err: Optional[Exception] = None
         for _ in range(self.retries + 1):
             try:
-                if self.provider == "ollama":
-                    return self._ollama_chat(
-                        messages=messages,
-                        model=model or self.model,
-                        temperature=temperature,
-                        timeout_s=timeout,
-                    )
                 if self.provider == "api":
                     return self._api_chat(
                         messages=messages,
@@ -115,66 +91,6 @@ class LLMService:
                 last_err = exc
                 continue
         return None if last_err is not None else None
-
-    def _ollama_url(self, path: str) -> str:
-        base = (self.api_base or "http://localhost:11434").rstrip("/")
-        return f"{base}{path}"
-
-    def _ollama_generate(
-        self,
-        *,
-        prompt: str,
-        model: str,
-        temperature: float,
-        timeout_s: int,
-    ) -> Optional[str]:
-        data = json.dumps(
-            {
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {"temperature": float(temperature)},
-            }
-        ).encode("utf-8")
-
-        req = urllib.request.Request(
-            self._ollama_url("/api/generate"),
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=timeout_s) as response:
-            result = json.loads(response.read().decode("utf-8"))
-        return result.get("response") or ""
-
-    def _ollama_chat(
-        self,
-        *,
-        messages: List[Dict[str, str]],
-        model: str,
-        temperature: float,
-        timeout_s: int,
-    ) -> Optional[str]:
-        data = json.dumps(
-            {
-                "model": model,
-                "messages": messages,
-                "stream": False,
-                "options": {"temperature": float(temperature)},
-            }
-        ).encode("utf-8")
-        req = urllib.request.Request(
-            self._ollama_url("/api/chat"),
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=timeout_s) as response:
-            result = json.loads(response.read().decode("utf-8"))
-        msg = result.get("message") if isinstance(result, dict) else {}
-        if isinstance(msg, dict):
-            return msg.get("content") or ""
-        return result.get("response") or ""
 
     def _api_chat(
         self,

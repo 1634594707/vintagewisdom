@@ -46,8 +46,8 @@ class GraphRAGService:
 
         ecfg = config.get("graphrag.embedding", {}) or {}
         self._embedder = EmbeddingClient(
-            provider=str(ecfg.get("provider") or "ollama"),
-            model=str(ecfg.get("model") or "nomic-embed-text"),
+            provider=str(ecfg.get("provider") or "api"),
+            model=str(ecfg.get("model") or "text-embedding-3-small"),
             api_base=str(ecfg.get("api_base") or "") or None,
             api_key=str(ecfg.get("api_key") or "") or None,
         )

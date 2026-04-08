@@ -1,4 +1,4 @@
-"""AI决策助手 - 支持本地Ollama和远程API"""
+"""AI决策助手 - 仅支持远程API"""
 
 from typing import Dict, List, Optional, Tuple
 
@@ -7,12 +7,12 @@ from ..core.llm import LLMService
 
 
 class AIDecisionAssistant:
-    """AI决策助手，支持多种模型来源"""
+    """AI决策助手，基于远程 API"""
     
     def __init__(
         self,
-        provider: str = "ollama",  # "ollama" 或 "api"
-        model: str = "qwen3.5:4b",
+        provider: str = "api",
+        model: str = "gpt-4.1-mini",
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
         timeout_s: int = 30,
@@ -30,16 +30,6 @@ class AIDecisionAssistant:
             timeout_s=timeout_s,
             retries=retries,
         )
-    
-    def _call_ollama(self, prompt: str) -> Optional[str]:
-        """调用本地Ollama"""
-        if self.provider != "ollama":
-            return None
-        try:
-            return self._llm.generate(prompt, temperature=0.7)
-        except Exception as e:
-            print(f"Ollama call failed: {e}")
-            return None
     
     def _call_api(self, prompt: str) -> Optional[str]:
         """调用远程API（OpenAI格式）"""
@@ -59,9 +49,7 @@ class AIDecisionAssistant:
     
     def _call_ai(self, prompt: str) -> Optional[str]:
         """根据配置调用AI"""
-        if self.provider == "ollama":
-            return self._call_ollama(prompt)
-        elif self.provider == "api":
+        if self.provider == "api":
             return self._call_api(prompt)
         return None
     
@@ -245,8 +233,8 @@ _ai_assistant: Optional[AIDecisionAssistant] = None
 
 
 def get_ai_assistant(
-    provider: str = "ollama",
-    model: str = "qwen3.5:4b",
+    provider: str = "api",
+    model: str = "gpt-4.1-mini",
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,
     timeout_s: int = 30,
@@ -267,8 +255,8 @@ def get_ai_assistant(
 
 
 def update_ai_config(
-    provider: str = "ollama",
-    model: str = "qwen3.5:4b",
+    provider: str = "api",
+    model: str = "gpt-4.1-mini",
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,
     timeout_s: int = 30,

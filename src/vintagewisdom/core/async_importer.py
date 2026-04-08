@@ -201,58 +201,7 @@ class AsyncImporter:
     
     def _perform_ai_classification(self, task_id: str, case_ids: List[str], total_cases: int):
         """执行 AI 分类"""
-        try:
-            from ..ai.ollama_classifier import get_ollama_classifier
-            
-            classifier = get_ollama_classifier()
-            if not classifier:
-                print("AI classifier not available, skipping classification")
-                return
-            
-            for i, case_id in enumerate(case_ids):
-                try:
-                    self.task_store.update_progress(
-                        task_id,
-                        total_cases,
-                        current_case=case_id[:30],
-                        current_action=f"AI分类中... ({i+1}/{len(case_ids)})"
-                    )
-
-                    try:
-                        self.task_store.update_stage(task_id, "classify", i + 1, len(case_ids))
-                    except Exception:
-                        pass
-                    
-                    # 获取案例
-                    case = self.db.get_case(case_id)
-                    
-                    # 构建文本用于分类
-                    text = f"{case.title}\n{case.description or ''}\n{case.decision_node or ''}"
-                    
-                    # AI 分类
-                    results = classifier.classify_domain(text)
-                    if results:
-                        # accuracy-first: only update primary domain if confidence is decent
-                        top = results[0]
-                        try:
-                            top_conf = float(top.get("confidence") or 0)
-                        except Exception:
-                            top_conf = 0.0
-                        if top_conf >= 0.6 and top.get("domain"):
-                            case.domain = str(top.get("domain"))
-
-                        try:
-                            case.domain_tags = json.dumps(results[:3], ensure_ascii=False)
-                        except Exception:
-                            case.domain_tags = None
-
-                        self.db.insert_case(case)
-                        
-                except Exception as e:
-                    print(f"Failed to classify case {case_id}: {e}")
-                    
-        except Exception as e:
-            print(f"AI classification failed: {e}")
+        return
     
     def _perform_ai_clustering(self, task_id: str, case_ids: List[str], total_cases: int):
         """执行 AI 聚类"""
@@ -293,8 +242,8 @@ class AsyncImporter:
             from ..ai.decision_assistant import AIDecisionAssistant
             from ..knowledge.kg_extractor import extract_kg_from_case
 
-            provider = self.config.get("ai.provider", "ollama")
-            model = self.config.get("ai.model", "qwen3.5:4b")
+            provider = self.config.get("ai.provider", "api")
+            model = self.config.get("ai.model", "gpt-4.1-mini")
             api_key = self.config.get("ai.api_key", "") or None
             api_base = self.config.get("ai.api_base", "") or None
 

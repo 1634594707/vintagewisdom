@@ -12,7 +12,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
-from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from ..core.engine import Engine
@@ -93,19 +92,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     import_csv.add_argument(
         "--llm",
-        choices=["", "ollama"],
+        choices=["", "api"],
         default="",
         help="Optional LLM backend for cleanup/extraction during import",
     )
     import_csv.add_argument(
-        "--ollama-url",
-        default="http://127.0.0.1:11434",
-        help="Ollama base URL (default: http://127.0.0.1:11434)",
+        "--api-base",
+        default="",
+        help="API base URL (OpenAI-compatible, e.g. https://api.openai.com/v1)",
     )
     import_csv.add_argument(
-        "--ollama-model",
+        "--llm-model",
         default="",
-        help="Ollama model tag (e.g. qwen3.5:4b)",
+        help="LLM model name (e.g. gpt-4.1-mini)",
     )
     import_csv.add_argument(
         "--llm-mode",
@@ -153,19 +152,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     scan_csv.add_argument(
         "--llm",
-        choices=["", "ollama"],
+        choices=["", "api"],
         default="",
         help="Optional LLM backend for cleanup/extraction during import",
     )
     scan_csv.add_argument(
-        "--ollama-url",
-        default="http://127.0.0.1:11434",
-        help="Ollama base URL (default: http://127.0.0.1:11434)",
+        "--api-base",
+        default="",
+        help="API base URL (OpenAI-compatible, e.g. https://api.openai.com/v1)",
     )
     scan_csv.add_argument(
-        "--ollama-model",
+        "--llm-model",
         default="",
-        help="Ollama model tag (e.g. qwen3.5:4b)",
+        help="LLM model name (e.g. gpt-4.1-mini)",
     )
     scan_csv.add_argument(
         "--llm-mode",
@@ -208,19 +207,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ingest_dir.add_argument(
         "--llm",
-        choices=["", "ollama"],
+        choices=["", "api"],
         default="",
         help="Optional LLM backend for cleanup/extraction during CSV import",
     )
     ingest_dir.add_argument(
-        "--ollama-url",
-        default="http://127.0.0.1:11434",
-        help="Ollama base URL (default: http://127.0.0.1:11434)",
+        "--api-base",
+        default="",
+        help="API base URL (OpenAI-compatible, e.g. https://api.openai.com/v1)",
     )
     ingest_dir.add_argument(
-        "--ollama-model",
+        "--llm-model",
         default="",
-        help="Ollama model tag (e.g. qwen3.5:4b)",
+        help="LLM model name (e.g. gpt-4.1-mini)",
     )
     ingest_dir.add_argument(
         "--llm-mode",
@@ -262,19 +261,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ingest_doc.add_argument(
         "--llm",
-        choices=["", "ollama"],
+        choices=["", "api"],
         default="",
         help="Optional LLM backend for extraction into structured Case",
     )
     ingest_doc.add_argument(
-        "--ollama-url",
-        default="http://127.0.0.1:11434",
-        help="Ollama base URL (default: http://127.0.0.1:11434)",
+        "--api-base",
+        default="",
+        help="API base URL (OpenAI-compatible, e.g. https://api.openai.com/v1)",
     )
     ingest_doc.add_argument(
-        "--ollama-model",
+        "--llm-model",
         default="",
-        help="Ollama model tag (e.g. qwen3.5:4b)",
+        help="LLM model name (e.g. gpt-4.1-mini)",
     )
 
     sub.add_parser("stats", help="Show basic stats")
@@ -586,8 +585,8 @@ def _import_csv_file(
     default_domain: str,
     on_conflict: str,
     llm: str,
-    ollama_url: str,
-    ollama_model: str,
+    api_base: str,
+    llm_model: str,
     llm_mode: str,
     use_tabular: bool = False,
     allow_missing_id: bool = False,
@@ -609,9 +608,9 @@ def _import_csv_file(
     failed = 0
     case_ids: list[str] = []
 
-    use_llm = llm == "ollama"
-    if use_llm and not ollama_model:
-        raise RuntimeError("--ollama-model is required when --llm ollama")
+    use_llm = llm == "api"
+    if use_llm and not llm_model:
+        raise RuntimeError("--llm-model is required when --llm api")
 
     with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
@@ -648,9 +647,9 @@ def _import_csv_file(
                 if use_llm:
                     if llm_mode == "extract":
                         raw_text = _row_to_text(row)
-                        llm_data = _ollama_extract_case(
-                            base_url=ollama_url,
-                            model=ollama_model,
+                        llm_data = _api_extract_case(
+                            api_base=api_base,
+                            model=llm_model,
                             raw_text=raw_text,
                         )
                         case = _merge_llm_case_fields(base_case, llm_data)
@@ -669,9 +668,9 @@ def _import_csv_file(
                                 "confidence": base_case.confidence or "",
                             }
                         )
-                        llm_data = _ollama_extract_case(
-                            base_url=ollama_url,
-                            model=ollama_model,
+                        llm_data = _api_extract_case(
+                            api_base=api_base,
+                            model=llm_model,
                             raw_text=raw_text,
                         )
                         case = _merge_llm_case_fields(base_case, llm_data)
@@ -857,9 +856,9 @@ def _ingest_text_file(
     return 1, 0, 0, [case.id]
 
 
-def _ollama_extract_case(
+def _api_extract_case(
     *,
-    base_url: str,
+    api_base: str,
     model: str,
     raw_text: str,
 ) -> Dict[str, Any]:
@@ -895,34 +894,51 @@ def _ollama_extract_case(
             {"role": "system", "content": "你是一位严谨的中文信息抽取助手，只返回可解析的 JSON。"},
             {"role": "user", "content": prompt},
         ],
-        "stream": False,
-        "format": "json",
+        "temperature": 0.2,
+        "response_format": {"type": "json_object"},
     }
 
-    url = base_url.rstrip("/") + "/api/chat"
+    final_api_base = (api_base or "").strip()
+    if not final_api_base:
+        raise RuntimeError("Missing --api-base for --llm api")
+    api_key = ""
+    try:
+        from os import getenv
+        api_key = getenv("AI_API_KEY", "") or ""
+    except Exception:
+        api_key = ""
+    if not api_key:
+        raise RuntimeError("Missing AI_API_KEY environment variable for --llm api")
+
+    url = final_api_base.rstrip("/") + "/chat/completions"
     req = Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
     )
     try:
         with urlopen(req, timeout=120) as resp:
             body = resp.read().decode("utf-8")
-    except URLError as e:
-        raise RuntimeError(f"Ollama request failed: {e}")
+    except Exception as e:
+        raise RuntimeError(f"API request failed: {e}")
 
     data = json.loads(body)
     if data.get("error"):
-        raise RuntimeError(f"Ollama error: {data.get('error')}")
+        raise RuntimeError(f"API error: {data.get('error')}")
 
-    message = data.get("message") or {}
-    response_text = (message.get("content") or "").strip()
+    choices = data.get("choices") if isinstance(data, dict) else None
+    message = choices[0].get("message") if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+    response_text = (message.get("content") if isinstance(message, dict) else "") or ""
+    response_text = response_text.strip()
     if not response_text:
-        raise RuntimeError("Ollama returned empty response")
+        raise RuntimeError("API returned empty response")
 
     extracted = json.loads(response_text)
     if not isinstance(extracted, dict):
-        raise RuntimeError("Ollama response is not a JSON object")
+        raise RuntimeError("API response is not a JSON object")
     return extracted
 
 
@@ -1081,9 +1097,9 @@ def main(argv: list[str] | None = None) -> int:
             skipped = 0
             failed = 0
 
-            use_llm = args.llm == "ollama"
-            if use_llm and not args.ollama_model:
-                print("--ollama-model is required when --llm ollama", file=sys.stderr)
+            use_llm = args.llm == "api"
+            if use_llm and not args.llm_model:
+                print("--llm-model is required when --llm api", file=sys.stderr)
                 return 1
 
             for i, row in enumerate(reader, start=2):
@@ -1094,9 +1110,9 @@ def main(argv: list[str] | None = None) -> int:
                     if use_llm:
                         if args.llm_mode == "extract":
                             raw_text = _row_to_text(row)
-                            llm_data = _ollama_extract_case(
-                                base_url=args.ollama_url,
-                                model=args.ollama_model,
+                            llm_data = _api_extract_case(
+                                api_base=args.api_base,
+                                model=args.llm_model,
                                 raw_text=raw_text,
                             )
                             case = _merge_llm_case_fields(base_case, llm_data)
@@ -1113,9 +1129,9 @@ def main(argv: list[str] | None = None) -> int:
                                 "lesson_core": base_case.lesson_core or "",
                                 "confidence": base_case.confidence or "",
                             })
-                            llm_data = _ollama_extract_case(
-                                base_url=args.ollama_url,
-                                model=args.ollama_model,
+                            llm_data = _api_extract_case(
+                                api_base=args.api_base,
+                                model=args.llm_model,
                                 raw_text=raw_text,
                             )
                             case = _merge_llm_case_fields(base_case, llm_data)
@@ -1191,8 +1207,8 @@ def main(argv: list[str] | None = None) -> int:
                         default_domain=args.default_domain,
                         on_conflict=args.on_conflict,
                         llm=args.llm,
-                        ollama_url=args.ollama_url,
-                        ollama_model=args.ollama_model,
+                        api_base=args.api_base,
+                        llm_model=args.llm_model,
                         llm_mode=args.llm_mode,
                     )
                     status = "success" if failed == 0 else "partial"
@@ -1314,8 +1330,8 @@ def main(argv: list[str] | None = None) -> int:
                         default_domain=args.default_domain,
                         on_conflict=args.on_conflict,
                         llm=args.llm,
-                        ollama_url=args.ollama_url,
-                        ollama_model=args.ollama_model,
+                        api_base=args.api_base,
+                        llm_model=args.llm_model,
                         llm_mode=args.llm_mode,
                         use_tabular=bool(args.tabular),
                         allow_missing_id=True,
@@ -1494,15 +1510,15 @@ def main(argv: list[str] | None = None) -> int:
             if not text:
                 raise RuntimeError("No text extracted")
 
-            use_llm = args.llm == "ollama"
-            if use_llm and not args.ollama_model:
-                raise RuntimeError("--ollama-model is required when --llm ollama")
+            use_llm = args.llm == "api"
+            if use_llm and not args.llm_model:
+                raise RuntimeError("--llm-model is required when --llm api")
 
             now = utc_now()
             if use_llm:
-                llm_data = _ollama_extract_case(
-                    base_url=args.ollama_url,
-                    model=args.ollama_model,
+                llm_data = _api_extract_case(
+                    api_base=args.api_base,
+                    model=args.llm_model,
                     raw_text=text,
                 )
                 base = Case(

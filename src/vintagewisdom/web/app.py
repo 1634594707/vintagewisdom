@@ -1775,8 +1775,8 @@ def create_app():
     def get_ai_config() -> Dict[str, Any]:
         """获取当前AI配置（不包含敏感信息）"""
         return {
-            "provider": engine.config.get("ai.provider", "ollama"),
-            "model": engine.config.get("ai.model", "qwen3.5:4b"),
+            "provider": engine.config.get("ai.provider", "api"),
+            "model": engine.config.get("ai.model", "gpt-4.1-mini"),
             "api_base": engine.config.get("ai.api_base", ""),
             "api_key_set": bool(engine.config.get("ai.api_key", "")),
         }
@@ -1806,8 +1806,8 @@ def create_app():
 
     @app.post("/ai/config")
     def update_ai_config(
-        provider: str = Body("ollama"),
-        model: str = Body("qwen3.5:4b"),
+        provider: str = Body("api"),
+        model: str = Body("gpt-4.1-mini"),
         api_key: str = Body(""),
         api_base: str = Body(""),
     ) -> Dict[str, str]:

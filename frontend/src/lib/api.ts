@@ -267,8 +267,11 @@ export function isFetchFailure(error: unknown): boolean {
 }
 
 function apiBase(): string {
-  // 默认走同源 /api 代理，避免生产环境误连到浏览器本机地址。
-  return process.env.NEXT_PUBLIC_API_BASE || "/api";
+  // 浏览器端可走同源 /api 代理；服务端必须使用绝对地址。
+  if (typeof window !== "undefined") {
+    return process.env.NEXT_PUBLIC_API_BASE || "/api";
+  }
+  return process.env.INTERNAL_API_BASE || process.env.API_BASE || process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000";
 }
 
 async function fetchForm<T>(path: string, form: FormData): Promise<T> {

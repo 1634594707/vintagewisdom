@@ -50,17 +50,7 @@ def auto_classify_domain(text: str, use_ai: bool = True, timeout: int = 30) -> L
     Returns:
         List of {"domain": str, "confidence": float, "reason": str}
     """
-    # 如果启用AI，使用Ollama进行分类
-    if use_ai:
-        try:
-            from ..ai.ollama_classifier import ai_classify_domain as ai_classify
-            ai_results = ai_classify(text, timeout=timeout)
-            if ai_results:
-                return ai_results
-        except Exception as e:
-            print(f"AI分类失败: {e}")
-    
-    # AI不可用或失败时返回空结果（不使用关键词匹配）
+    # 线上版不再内置本地模型分类，保持显式空返回。
     return []
 
 

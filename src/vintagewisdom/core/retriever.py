@@ -85,49 +85,10 @@ class Retriever:
         )
     
     def _semantic_match(self, query: str, candidates: List[Case]) -> List[tuple[float, Case]]:
-        """使用AI进行语义匹配"""
+        """语义匹配降级实现（无本地模型依赖）"""
         scored = []
-        
-        # 尝试使用AI分类查询的领域
-        try:
-            from ..ai.ollama_classifier import ai_classify_domain
-            query_domains = ai_classify_domain(query, timeout=10)
-            
-            if query_domains:
-                query_domain = query_domains[0]['domain']
-                
-                # 根据领域匹配案例
-                for case in candidates:
-                    score = 0
-                    
-                    # 相同领域加分
-                    if case.domain and case.domain.upper() == query_domain.upper():
-                        score += 100
-                    # 同一大类加分
-                    elif case.domain and case.domain.split('-')[0].upper() == query_domain.split('-')[0].upper():
-                        score += 50
 
-                    # Multi-label tags bonus (if present)
-                    try:
-                        if getattr(case, "domain_tags", None):
-                            tags = json.loads(case.domain_tags) if isinstance(case.domain_tags, str) else []
-                            if isinstance(tags, list):
-                                tag_codes = [str(t.get("domain") or t.get("code") or "").upper() for t in tags if isinstance(t, dict)]
-                                if query_domain.upper() in tag_codes:
-                                    score += 80
-                                else:
-                                    qmain = query_domain.split("-", 1)[0].upper()
-                                    if any(c.split("-", 1)[0].upper() == qmain for c in tag_codes if c):
-                                        score += 30
-                    except Exception:
-                        pass
-                    
-                    if score > 0:
-                        scored.append((score, case))
-        except Exception as e:
-            print(f"Semantic match failed: {e}")
-        
-        # 如果AI匹配也失败，返回所有案例（低分）
+        # 无额外模型可用时，返回统一低分候选。
         if not scored:
             for case in candidates:
                 scored.append((1, case))

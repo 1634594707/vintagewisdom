@@ -35,8 +35,8 @@ class Engine:
         from ..ai.decision_assistant import AIDecisionAssistant
         
         # 从配置中读取AI设置
-        ai_provider = self.config.get("ai.provider", "ollama")
-        ai_model = self.config.get("ai.model", "qwen3.5:4b")
+        ai_provider = self.config.get("ai.provider", "api")
+        ai_model = self.config.get("ai.model", "gpt-4.1-mini")
         ai_api_key = self.config.get("ai.api_key", "")
         ai_api_base = self.config.get("ai.api_base", "")
         ai_timeout = self.config.get("ai.timeout_s", 30)
@@ -117,8 +117,8 @@ class Engine:
     
     def update_ai_config(
         self,
-        provider: str = "ollama",
-        model: str = "qwen3.5:4b",
+        provider: str = "api",
+        model: str = "gpt-4.1-mini",
         api_key: Optional[str] = None,
         api_base: Optional[str] = None
     ):
