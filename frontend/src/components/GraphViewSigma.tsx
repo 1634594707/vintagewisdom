@@ -113,19 +113,19 @@ interface GraphEdgeWithEvidence extends GraphEdge {
 }
 
 const THEME = {
-  background: "#fafafa",
-  edgeDomain: "rgba(148, 163, 184, 0.22)",
-  edgeSimilar: "rgba(234, 88, 12, 0.62)",
-  edgeCluster: "rgba(148, 163, 184, 0.22)",
-  edgeFocus: "rgba(244, 63, 94, 0.75)",
+  background: "#f8fafc",
+  edgeDomain: "rgba(100, 116, 139, 0.20)",
+  edgeSimilar: "rgba(249, 115, 22, 0.58)",
+  edgeCluster: "rgba(56, 189, 248, 0.22)",
+  edgeFocus: "rgba(99, 102, 241, 0.76)",
   nodeCase: {
-    color: "#9ca3af",
+    color: "#6b7280",
   },
   nodeDomain: {
-    color: "#60a5fa",
+    color: "#3b82f6",
   },
   nodeCluster: {
-    color: "#34d399",
+    color: "#14b8a6",
   },
 };
 
@@ -222,6 +222,12 @@ function clamp01(v: unknown): number {
   const n = typeof v === "number" ? v : Number(v);
   if (!Number.isFinite(n)) return 0;
   return Math.max(0, Math.min(1, n));
+}
+
+function compactLabel(text: string, max = 16): string {
+  const t = (text || "").trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max)}...`;
 }
 
 function GraphCanvas({
@@ -437,11 +443,12 @@ function GraphCanvas({
       for (const n of graph.nodes) {
         if (g.hasNode(n.id)) continue;
         const baseColor = pickNodeColor(n);
-        const size = n.type === "domain" ? 7 : n.type === "cluster" ? 8 : 4;
+        const size = n.type === "domain" ? 8.5 : n.type === "cluster" ? 7.2 : 4.6;
         const fill = n.type === "domain" ? withAlpha(baseColor, 0.16) : withAlpha(baseColor, 1.0);
         const border = withAlpha(baseColor, 1.0);
         g.addNode(n.id, {
-          label: n.label,
+          label: compactLabel(n.label || n.id),
+          fullLabel: n.label,
           x: Math.random() * 10 - 5,
           y: Math.random() * 10 - 5,
           size,
@@ -459,6 +466,23 @@ function GraphCanvas({
       const edgesAll = graph.edges.slice();
       const batchSize = g.order > 800 ? 400 : g.order > 300 ? 700 : 1200;
       let idx = 0;
+      const applyDegreeSizing = () => {
+        try {
+          g.forEachNode((nodeId: string) => {
+            const deg = g.degree(nodeId);
+            const nodeType = String(g.getNodeAttribute(nodeId, "nodeType") || "");
+            const base = nodeType === "domain" ? 8.5 : nodeType === "cluster" ? 7.2 : 4.6;
+            const boost = Math.min(3.2, Math.log2(deg + 1) * 0.9);
+            const nextSize = Math.max(base, base + boost);
+            g.setNodeAttribute(nodeId, "size", Number(nextSize.toFixed(2)));
+            if (deg >= 8) {
+              g.setNodeAttribute(nodeId, "borderWidth", Math.max(2.2, Number(g.getNodeAttribute(nodeId, "borderWidth") || 1.4)));
+            }
+          });
+        } catch {
+          // ignore sizing failures
+        }
+      };
       const addEdgeBatch = () => {
         if (disposed) return;
         const end = Math.min(edgesAll.length, idx + batchSize);
@@ -528,6 +552,9 @@ function GraphCanvas({
         sigmaRef.current?.refresh?.();
         if (idx < edgesAll.length) {
           setTimeout(addEdgeBatch, 0);
+        } else {
+          applyDegreeSizing();
+          sigmaRef.current?.refresh?.();
         }
       };
 
@@ -795,7 +822,7 @@ function GraphCanvas({
 
             if (!showTypeChip && !showMainLabel) return;
 
-            const font = settings?.labelFont || "Arial";
+            const font = settings?.labelFont || "PingFang SC, Microsoft YaHei UI, sans-serif";
             const size = Math.max(11, Math.floor((settings?.labelSize || 12) * (isDomain ? 1.05 : 1.0)));
             const x = data.x;
             const y = data.y;
@@ -948,7 +975,7 @@ function GraphCanvas({
     return;
   }, [selectedId]);
 
-  return <div ref={containerRef} className="h-full w-full" />;
+  return <div ref={containerRef} className="h-full w-full rounded-[18px]" />;
 }
 
 export default function GraphViewSigma({
@@ -1099,9 +1126,16 @@ export default function GraphViewSigma({
       <div
         className="pointer-events-none absolute inset-0 z-0"
         style={{
+          background:
+            "radial-gradient(1200px 560px at 20% -5%, rgba(99,102,241,0.08), transparent 60%), radial-gradient(900px 500px at 95% 105%, rgba(20,184,166,0.06), transparent 55%)",
+        }}
+      />
+      <div
+        className="pointer-events-none absolute inset-0 z-0"
+        style={{
           backgroundImage:
-            "radial-gradient(circle at 1px 1px, rgba(17, 24, 39, 0.06) 1px, transparent 0)",
-          backgroundSize: "18px 18px",
+            "radial-gradient(circle at 1px 1px, rgba(15, 23, 42, 0.055) 1px, transparent 0)",
+          backgroundSize: "20px 20px",
           backgroundPosition: "0 0",
         }}
       />
@@ -1123,9 +1157,8 @@ export default function GraphViewSigma({
         />
       </div>
 
-      {/* 左下角图例占位：后续可扩展更多筛选 */}
-      <div className="absolute bottom-3 left-3 z-20 flex max-w-[calc(100vw-32px)] flex-wrap items-center gap-2 rounded-md border border-[color:var(--bg-tertiary)] bg-[var(--bg-secondary)]/90 px-2 py-1 text-[10px] text-[var(--text-muted)] backdrop-blur-sm">
-        <span>Drag to pan, scroll to zoom</span>
+      <div className="absolute bottom-3 left-3 z-20 flex max-w-[calc(100vw-32px)] flex-wrap items-center gap-2 rounded-lg border border-[color:var(--border-subtle)] bg-white/85 px-2.5 py-1.5 text-[10px] text-[var(--text-muted)] shadow-sm backdrop-blur-sm">
+        <span>拖拽平移，滚轮缩放</span>
         <span className="mx-1 text-[rgba(0,0,0,0.18)]">|</span>
         <button
           type="button"
@@ -1133,7 +1166,7 @@ export default function GraphViewSigma({
           className={showAllEdges ? "text-[var(--accent-primary)]" : "hover:text-[var(--text-primary)]"}
           title="大图建议关闭，避免渲染卡顿"
         >
-          {showAllEdges ? "All edges: ON" : "All edges: OFF"}
+          {showAllEdges ? "全部边: 开" : "全部边: 关"}
         </button>
 
         <span className="mx-1 text-[rgba(0,0,0,0.18)]">|</span>
@@ -1144,7 +1177,7 @@ export default function GraphViewSigma({
           className={showLabels ? "text-[var(--accent-primary)]" : "hover:text-[var(--text-primary)]"}
           title="显示/隐藏节点名称"
         >
-          {showLabels ? "Labels: ON" : "Labels: OFF"}
+          {showLabels ? "标签: 开" : "标签: 关"}
         </button>
 
         <button
@@ -1153,7 +1186,7 @@ export default function GraphViewSigma({
           className={showTypeChips ? "text-[var(--accent-primary)]" : "hover:text-[var(--text-primary)]"}
           title="显示/隐藏节点类型小标签"
         >
-          {showTypeChips ? "Type: ON" : "Type: OFF"}
+          {showTypeChips ? "类型: 开" : "类型: 关"}
         </button>
 
         <button
@@ -1162,7 +1195,7 @@ export default function GraphViewSigma({
           className={focusRedEdges ? "text-[var(--accent-primary)]" : "hover:text-[var(--text-primary)]"}
           title="focus 时是否使用红色高亮边"
         >
-          {focusRedEdges ? "Focus red: ON" : "Focus red: OFF"}
+          {focusRedEdges ? "聚焦高亮: 开" : "聚焦高亮: 关"}
         </button>
 
         <button
@@ -1171,7 +1204,7 @@ export default function GraphViewSigma({
           className={similarEdgeColorMode === "gradient" ? "text-[var(--accent-primary)]" : "hover:text-[var(--text-primary)]"}
           title="相似边配色：固定橙色 / 按相关度渐变"
         >
-          {similarEdgeColorMode === "gradient" ? "Similar: gradient" : "Similar: fixed"}
+          {similarEdgeColorMode === "gradient" ? "相似边: 渐变" : "相似边: 固定色"}
         </button>
 
         <button
@@ -1180,26 +1213,26 @@ export default function GraphViewSigma({
           className={allEdgesColorMode === "confidence_gradient" ? "text-[var(--accent-primary)]" : "hover:text-[var(--text-primary)]"}
           title="全边配色：默认灰 / 按相关度渐变（较克制）"
         >
-          {allEdgesColorMode === "confidence_gradient" ? "All edges: gradient" : "All edges: default"}
+          {allEdgesColorMode === "confidence_gradient" ? "全边: 置信渐变" : "全边: 默认"}
         </button>
       </div>
 
       {/* Node Details 抽屉浮层 */}
       {selectedNode && (
-        <div className="absolute right-3 top-16 z-30 w-[380px] overflow-hidden rounded-lg border border-[color:var(--bg-tertiary)] bg-[var(--bg-secondary)] shadow-sm">
-          <div className="flex items-center justify-between border-b border-[color:var(--bg-tertiary)] bg-[var(--bg-secondary)] px-3 py-2">
-            <div className="text-xs font-medium text-[var(--text-primary)]">Node Details</div>
+        <div className="absolute right-3 top-16 z-30 w-[390px] overflow-hidden rounded-2xl border border-[color:var(--border-subtle)] bg-white/96 shadow-xl backdrop-blur">
+          <div className="flex items-center justify-between border-b border-[color:var(--border-subtle)] bg-[rgba(248,250,252,0.9)] px-3 py-2.5">
+            <div className="text-xs font-medium text-[var(--text-primary)]">节点详情</div>
             <button
               type="button"
               onClick={() => setSelectedId("")}
-              className="rounded border border-[color:var(--bg-tertiary)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+              className="rounded border border-[color:var(--border-subtle)] bg-white px-2 py-0.5 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
             >
-              Close
+              关闭
             </button>
           </div>
 
           <div className="max-h-[calc(100vh-260px)] overflow-y-auto p-3">
-            <div className="rounded border border-[color:var(--bg-tertiary)] bg-[var(--bg-secondary)] p-3">
+            <div className="rounded-xl border border-[color:var(--border-subtle)] bg-[#f8fafc] p-3">
                 <div className="flex items-start justify-between">
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold text-[var(--text-primary)]">{selectedNode.label}</div>
@@ -1242,22 +1275,22 @@ export default function GraphViewSigma({
                 )}
 
                 {selectedNode.domain && (
-                  <div className="mt-2 pt-2 border-t border-[color:var(--bg-tertiary)]">
-                    <div className="text-[10px] text-[var(--text-muted)] mb-0.5">Domain</div>
+                  <div className="mt-2 pt-2 border-t border-[color:var(--border-subtle)]">
+                    <div className="text-[10px] text-[var(--text-muted)] mb-0.5">领域</div>
                     <div className="text-xs text-[var(--text-secondary)]">{selectedNode.domain}</div>
                   </div>
                 )}
 
                 {selectedNode.decision_node && (
-                  <div className="mt-2 pt-2 border-t border-[color:var(--bg-tertiary)]">
-                    <div className="text-[10px] text-[var(--text-muted)] mb-0.5">Decision Node</div>
+                  <div className="mt-2 pt-2 border-t border-[color:var(--border-subtle)]">
+                    <div className="text-[10px] text-[var(--text-muted)] mb-0.5">决策节点</div>
                     <div className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap">{selectedNode.decision_node}</div>
                   </div>
                 )}
 
                 {selectedNode.lesson_core && (
-                  <div className="mt-2 pt-2 border-t border-[color:var(--bg-tertiary)]">
-                    <div className="text-[10px] text-[var(--text-muted)] mb-0.5">Lesson Core</div>
+                  <div className="mt-2 pt-2 border-t border-[color:var(--border-subtle)]">
+                    <div className="text-[10px] text-[var(--text-muted)] mb-0.5">经验教训</div>
                     <div className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap">{selectedNode.lesson_core}</div>
                   </div>
                 )}
@@ -1267,22 +1300,22 @@ export default function GraphViewSigma({
                 )}
 
                 {!isKg && selectedNode.type === "case" && caseDetails?.decision_node && (
-                  <div className="mt-2 pt-2 border-t border-[color:var(--bg-tertiary)]">
-                    <div className="text-[10px] text-[var(--text-muted)] mb-0.5">Decision Node</div>
+                  <div className="mt-2 pt-2 border-t border-[color:var(--border-subtle)]">
+                    <div className="text-[10px] text-[var(--text-muted)] mb-0.5">决策节点</div>
                     <div className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap">{caseDetails.decision_node}</div>
                   </div>
                 )}
 
                 {!isKg && selectedNode.type === "case" && caseDetails?.lesson_core && (
-                  <div className="mt-2 pt-2 border-t border-[color:var(--bg-tertiary)]">
-                    <div className="text-[10px] text-[var(--text-muted)] mb-0.5">Lesson Core</div>
+                  <div className="mt-2 pt-2 border-t border-[color:var(--border-subtle)]">
+                    <div className="text-[10px] text-[var(--text-muted)] mb-0.5">经验教训</div>
                     <div className="text-xs text-[var(--text-secondary)] whitespace-pre-wrap">{caseDetails.lesson_core}</div>
                   </div>
                 )}
 
                 {attributeEntries.length > 0 && (
-                  <div className="mt-2 pt-2 border-t border-[color:var(--bg-tertiary)]">
-                    <div className="text-[10px] text-[var(--text-muted)] mb-1">Attributes</div>
+                  <div className="mt-2 pt-2 border-t border-[color:var(--border-subtle)]">
+                    <div className="text-[10px] text-[var(--text-muted)] mb-1">扩展属性</div>
                     <div className="space-y-1">
                       {attributeEntries.map(([k, v]) => (
                         <div key={k} className="rounded border border-[color:var(--bg-tertiary)] bg-[var(--bg-secondary)] px-2 py-1">
@@ -1300,16 +1333,16 @@ export default function GraphViewSigma({
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <div className="rounded border border-[color:var(--bg-tertiary)] bg-[var(--bg-secondary)] p-2 text-center">
                   <div className="text-lg font-semibold text-[var(--accent-primary)]">{connected.edges.length}</div>
-                  <div className="text-[10px] text-[var(--text-muted)]">Edges</div>
+                  <div className="text-[10px] text-[var(--text-muted)]">关联边</div>
                 </div>
                 <div className="rounded border border-[color:var(--bg-tertiary)] bg-[var(--bg-secondary)] p-2 text-center">
                   <div className="text-lg font-semibold text-[var(--accent-primary)]">{connected.nodes.length}</div>
-                  <div className="text-[10px] text-[var(--text-muted)]">Nodes</div>
+                  <div className="text-[10px] text-[var(--text-muted)]">相邻节点</div>
                 </div>
               </div>
 
               <div>
-                <div className="mb-1 text-[10px] font-medium text-[var(--text-primary)]">Neighbors</div>
+                <div className="mb-1 text-[10px] font-medium text-[var(--text-primary)]">相邻节点列表</div>
                 <div className="space-y-1">
                   {connected.nodes.slice(0, 50).map((n) => (
                     <button
@@ -1324,13 +1357,13 @@ export default function GraphViewSigma({
                       <span className="text-[10px] text-[var(--text-muted)]">{n.type}</span>
                     </button>
                   ))}
-                  {connected.nodes.length === 0 && <div className="text-center py-6 text-xs text-[var(--text-muted)]">No neighbors</div>}
+                  {connected.nodes.length === 0 && <div className="text-center py-6 text-xs text-[var(--text-muted)]">暂无相邻节点</div>}
                 </div>
               </div>
 
               {evidenceItems.length > 0 && (
                 <div>
-                  <div className="mb-1 text-[10px] font-medium text-[var(--text-primary)]">Evidence</div>
+                  <div className="mb-1 text-[10px] font-medium text-[var(--text-primary)]">证据摘录</div>
                   <div className="space-y-2">
                     {evidenceItems.map((ev, idx) => (
                       <div

@@ -21,6 +21,11 @@ const monoFont = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "VintageWisdom",
   description: "Personal decision support system powered by historical case intelligence.",
+  icons: {
+    icon: "/icon.svg",
+    shortcut: "/icon.svg",
+    apple: "/icon.svg",
+  },
 };
 
 export default function RootLayout({

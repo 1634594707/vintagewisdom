@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { NoticeBanner, SectionIntro, ToggleChip } from "@/components/ui/workspace";
 import GraphViewSigma from "@/components/GraphViewSigma";
-import { api, type GraphResponse, type GraphNode } from "@/lib/api";
+import { api, type GraphResponse } from "@/lib/api";
 
 const RELATION_OPTIONS = ["related_to", "causes", "leads_to", "part_of", "used_for"];
 
@@ -17,8 +17,6 @@ export default function GraphPage() {
   const [kgQuery, setKgQuery] = useState("");
   const [kgSeed, setKgSeed] = useState("");
   const [kgRelationType, setKgRelationType] = useState("");
-  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-  const [showNodePanel, setShowNodePanel] = useState(false);
   const [useAIClustering, setUseAIClustering] = useState(false);
   const [showSimilarEdges, setShowSimilarEdges] = useState(true);
 
@@ -64,11 +62,6 @@ export default function GraphPage() {
   useEffect(() => {
     fetchGraph();
   }, [fetchGraph]);
-
-  const handleNodeClick = (node: GraphNode) => {
-    setSelectedNode(node);
-    setShowNodePanel(true);
-  };
 
   const graphStats = graph?.stats;
 
@@ -152,7 +145,7 @@ export default function GraphPage() {
 
         {error ? <NoticeBanner tone="error">图谱加载失败：{error}</NoticeBanner> : null}
 
-        <section className="relative overflow-hidden rounded-[28px] border border-[color:var(--border-subtle)] bg-white">
+        <section className="relative overflow-hidden rounded-[28px] border border-[color:var(--border-subtle)] bg-gradient-to-b from-white to-[#f8fafc] shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
           <div className="absolute left-4 top-4 z-20 flex flex-wrap gap-2">
             <OverlayBadge label={mode === "case" ? "案例图谱" : "知识图谱"} />
             {mode === "case" && showSimilarEdges && graphStats && graphStats.similar_edge_count > 0 ? (
@@ -163,69 +156,11 @@ export default function GraphPage() {
             ) : null}
           </div>
 
-          {/* 节点详情面板 */}
-          {showNodePanel && selectedNode && (
-            <div className="absolute right-4 top-4 z-20 w-80 rounded-2xl border border-[color:var(--border-subtle)] bg-white p-4 shadow-lg">
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex-1">
-                  <div className="text-xs text-[var(--text-muted)] mb-1">
-                    {selectedNode.type === "domain" && "领域节点"}
-                    {selectedNode.type === "case" && "案例节点"}
-                    {selectedNode.type === "cluster" && "聚类节点"}
-                    {!["domain", "case", "cluster"].includes(selectedNode.type) && "实体节点"}
-                  </div>
-                  <div className="text-base font-medium text-[var(--text-primary)]">
-                    {selectedNode.label}
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowNodePanel(false)}
-                  className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                >
-                  ✕
-                </button>
-              </div>
-              
-              <div className="space-y-2 text-sm">
-                <div>
-                  <span className="text-[var(--text-muted)]">ID: </span>
-                  <span className="vw-mono text-xs text-[var(--text-secondary)]">{selectedNode.id}</span>
-                </div>
-                
-                {selectedNode.domain && (
-                  <div>
-                    <span className="text-[var(--text-muted)]">领域: </span>
-                    <span className="vw-badge vw-badge-accent">{selectedNode.domain}</span>
-                  </div>
-                )}
-                
-                {selectedNode.cluster_theme && (
-                  <div>
-                    <span className="text-[var(--text-muted)]">主题: </span>
-                    <span className="text-[var(--text-secondary)]">{selectedNode.cluster_theme}</span>
-                  </div>
-                )}
-                
-                {selectedNode.case_id && (
-                  <div className="pt-2">
-                    <a
-                      href={`/cases/${selectedNode.case_id}`}
-                      className="vw-btn-primary px-4 py-2 text-sm font-medium block text-center"
-                    >
-                      查看案例详情
-                    </a>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div className="h-[calc(100dvh-220px)] min-h-[720px]">
+          <div className="h-[calc(100dvh-220px)] min-h-[640px] lg:min-h-[720px]">
             {graph ? (
               <GraphViewSigma
                 graph={graph}
                 isKg={mode === "kg"}
-                onNodeClick={handleNodeClick}
                 onExpandSeed={(entityId) => {
                   setKgQuery("");
                   setKgSeed(entityId);
@@ -242,7 +177,7 @@ export default function GraphPage() {
         {/* 图例说明 */}
         <div className="rounded-2xl border border-[color:var(--border-subtle)] bg-[#f8f9fa] p-4">
           <div className="text-sm font-medium text-[var(--text-primary)] mb-3">图例说明</div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 text-sm">
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-blue-500"></div>
               <span className="text-[var(--text-secondary)]">领域节点</span>
@@ -260,6 +195,10 @@ export default function GraphPage() {
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-gray-400"></div>
               <span className="text-[var(--text-secondary)]">实体节点</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="h-[2px] w-5 rounded bg-orange-500"></div>
+              <span className="text-[var(--text-secondary)]">相似关系边</span>
             </div>
           </div>
           <div className="mt-3 pt-3 border-t border-[color:var(--border-subtle)] text-xs text-[var(--text-muted)]">

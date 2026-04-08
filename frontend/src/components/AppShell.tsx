@@ -72,9 +72,11 @@ export default function AppShell({
         <aside className="vw-panel hidden w-[272px] shrink-0 overflow-hidden rounded-2xl lg:flex lg:flex-col">
           <div className="border-b border-[color:var(--border-subtle)] px-5 py-6">
             <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-[var(--accent-primary)] to-[var(--accent-secondary)] text-base font-bold text-white shadow-lg">
-                VW
-              </div>
+              <img
+                src="/logo-vw.svg"
+                alt="VintageWisdom logo"
+                className="h-12 w-12 rounded-xl shadow-lg"
+              />
               <div>
                 <div className="vw-title text-2xl font-bold">VintageWisdom</div>
                 <div className="text-xs text-[var(--text-muted)]">决策支持系统</div>

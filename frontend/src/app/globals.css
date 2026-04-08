@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
 :root {
+  /* 字体：标题偏行楷，正文保证可读性 */
+  --font-cn-kaiti: "STKaiti", "KaiTi", "Kaiti SC", "DFKai-SB", "FZKai-Z03", serif;
+  --font-cn-body: "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif;
+
   /* 背景与表面 */
   --bg-primary: #ffffff;
   --bg-secondary: #f8f9fa;
@@ -55,7 +59,7 @@ body {
   min-height: 100vh;
   background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
   color: var(--text-primary);
-  font-family: var(--font-body), sans-serif;
+  font-family: var(--font-cn-body), var(--font-body), sans-serif;
 }
 
 a,
@@ -100,7 +104,7 @@ button {
 }
 
 .vw-title {
-  font-family: var(--font-heading), sans-serif;
+  font-family: var(--font-cn-kaiti), var(--font-heading), serif;
   letter-spacing: -0.02em;
   line-height: 1.2;
   color: var(--text-primary);
