@@ -1,36 +1,36 @@
 app:
   name: "VintageWisdom"
-  version: "0.1.0"
+  version: "1.0.0"
   debug: false
 
 storage:
   database_path: "data/vintagewisdom.db"
   vector_index_path: "data/vectors"
   graph_path: "data/graph"
-  backup_enabled: true
+  backup_enabled: false
   backup_interval: "daily"
 
 kg:
-  store: "sqlite"  # sqlite | neo4j
+  store: "sqlite"
   neo4j:
     uri: "bolt://127.0.0.1:7687"
     user: "neo4j"
     password: ""
     database: "neo4j"
   redis:
-    url: "redis://127.0.0.1:6379/0"
+    url: ""
     ttl_seconds: 300
   hot_index:
     refresh_seconds: 60
 
 graphrag:
-  enabled: true
+  enabled: false
   qdrant:
     url: "http://127.0.0.1:6333"
     collection: "vw_case_chunks"
     vector_size: 1024
   embedding:
-    provider: "ollama" # ollama | api
+    provider: "ollama"
     model: "nomic-embed-text"
     api_base: ""
     api_key: ""
@@ -41,7 +41,7 @@ graphrag:
     top_k: 20
 
 ai:
-  provider: "ollama" # ollama | api
+  provider: "ollama"
   model: "deepseek-r1:7b"
   api_base: ""
   api_key: ""
@@ -62,7 +62,7 @@ aio:
   use_cloud: false
   cloud_model: "gpt-4"
   redteam_enabled: true
-  future_self_enabled: true
+  future_self_enabled: false
 
 bias_detection:
   confirmation_bias_threshold: 0.7

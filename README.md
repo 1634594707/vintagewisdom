@@ -1,29 +1,21 @@
 # VintageWisdom
 
-VintageWisdom 是一个基于历史案例的个人决策支持系统，提供：
+VintageWisdom 是一个基于历史案例的轻量决策支持系统。当前仓库已经按“可上线、易维护、尽量精简”的目标完成收口，只保留后端核心、前端工作台、必要配置与部署文档。
 
-- Python CLI
-- FastAPI Web API
-- Next.js 前端工作台
-- CSV / JSON / PDF / DOCX 导入
-- 案例图谱与知识图谱展示
-- 可切换的 AI 配置
+## 仓库保留内容
 
-当前仓库已经收口为 `1.0.0` 发布版，示例素材、过程文档、失效脚本和未使用前端残留已移除。
-
-## 目录
-
-- `src/vintagewisdom/`: 后端与 CLI
+- `src/vintagewisdom/`: Python 后端、CLI、API 与核心服务
 - `frontend/`: Next.js 前端
-- `config/`: 默认配置
-- `data/`: 本地数据目录
-- `tests/`: 后端测试
-- `docs/`: 发布相关文档
+- `config/default.yaml`: 默认发布配置
+- `docs/`: API、架构与部署说明
+- `tests/`: 核心回归测试
+
+本地运行数据、私有配置、缓存文件与生成产物都不会提交到 git。
 
 ## 环境要求
 
-- Python `>= 3.10`
-- Node.js `>= 20`
+- Python `>=3.10`
+- Node.js `>=20`
 - `pnpm`
 - 推荐使用 `uv`
 
@@ -39,6 +31,20 @@ uv sync --extra dev --extra web --extra ingest
 pip install -e ".[dev,web,ingest]"
 ```
 
+## 本地覆盖配置
+
+`config/user.yaml` 只用于机器私有配置，例如 API Key、自定义路径等。这个文件已被 git 忽略，不应该提交。
+
+最小示例：
+
+```yaml
+ai:
+  provider: api
+  model: your-model
+  api_base: https://your-api-host/v1
+  api_key: your-secret
+```
+
 ## 初始化数据
 
 ```bash
@@ -51,88 +57,64 @@ python -m vintagewisdom init
 vw init
 ```
 
-## 启动后端 API
+## 启动 API
 
 ```bash
-python -m uvicorn vintagewisdom.web.app:create_app --factory --host 127.0.0.1 --port 8000 --reload
+python -m uvicorn vintagewisdom.web.app:create_app --factory --host 0.0.0.0 --port 8000
 ```
 
-启动后可访问：
+常用地址：
 
-- API 文档: `http://127.0.0.1:8000/docs`
-- 健康检查: `http://127.0.0.1:8000/health`
+- API 文档：`http://127.0.0.1:8000/docs`
+- 健康检查：`http://127.0.0.1:8000/health`
 
 ## 启动前端
 
 ```bash
 cd frontend
 pnpm install
+pnpm build
+pnpm start
+```
+
+本地开发可用：
+
+```bash
+cd frontend
 pnpm dev
 ```
 
-默认前端地址：
-
-- `http://127.0.0.1:3000`
-
-如果后端不在 `127.0.0.1:8000`：
+如果后端不在 `http://127.0.0.1:8000`，先设置：
 
 ```powershell
 $env:NEXT_PUBLIC_API_BASE = "http://127.0.0.1:8000"
-pnpm dev
 ```
 
-## 常用命令
+## 质量检查
 
-后端质量检查：
+后端：
 
 ```bash
 pytest
 ruff check .
-mypy src/
 ```
 
-前端质量检查：
+前端：
 
 ```bash
 cd frontend
-pnpm install
 pnpm lint
 pnpm build
 ```
 
-## CLI 示例
-
-```bash
-vw stats
-vw query "Should I accept this offer?"
-vw import-csv --file ./cases.csv
-vw ingest-doc --file ./docs/a.pdf --type auto
-```
-
-## 可选服务
-
-仓库内的 `docker-compose.yml` 仅用于启动可选依赖：
-
-- Redis
-- Qdrant
-
-```bash
-docker compose up -d
-```
-
-这不是完整生产部署编排；完整发布说明见 `docs/`。
-
 ## 发布说明
 
-- 当前版本：`1.0.0`
-- 已删除仓库内示例数据与模板文件
-- 已删除默认 `demo` 插件
-- 已删除未使用的 ReactFlow 旧图谱实现与默认静态资源
-- 已移除与当前仓库不一致的伪生产脚本
+- 默认配置已经收敛为最小可运行版本，启动时不依赖 Redis、Neo4j、Qdrant。
+- 运行期数据会写入 `data/`，但不会进入仓库。
+- 可选能力可以后续通过 `config/user.yaml` 再开启。
 
-## 文档
+详细说明见：
 
-- `docs/README.md`
-- `docs/api/API_SPECIFICATION.md`
 - `docs/deployment/DEPLOYMENT_GUIDE.md`
+- `docs/api/API_SPECIFICATION.md`
 - `docs/architecture/ARCHITECTURE.md`
