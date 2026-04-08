@@ -1,6 +1,6 @@
 [project]
 name = "vintagewisdom"
-version = "0.1.0"
+version = "1.0.0"
 description = "Personal decision support system based on historical cases"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -2,29 +2,24 @@
 
 前端基于 Next.js 16。
 
-启动方式:
+## 开发
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-补充:
+## 构建
 
-- `pnpm dev` 默认使用 `next dev --webpack`
-- 如需手动尝试 Turbopack: `pnpm run dev:turbo`
-
-默认读取后端:
-
-```text
-http://127.0.0.1:8000
+```bash
+pnpm build
+pnpm start
 ```
 
-如需修改:
+## 环境变量
 
-```powershell
-$env:NEXT_PUBLIC_API_BASE = "http://127.0.0.1:8000"
-pnpm dev
-```
+- `NEXT_PUBLIC_API_BASE`: 后端 API 地址，默认假设为 `http://127.0.0.1:8000`
 
-更完整的项目启动说明请看根目录 [README.md](d:/Administrator/Desktop/Full%20Stack/VintageWisdom/README.md)。
+## 说明
+
+发布版已移除未使用的 ReactFlow 旧图谱实现，当前图谱页面统一使用 Sigma 版本组件。

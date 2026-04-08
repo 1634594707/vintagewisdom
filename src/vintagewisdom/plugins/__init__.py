@@ -1,6 +1,5 @@
 __all__ = [
     "base",
-    "demo",
     "kg_extract",
     "ai_classify",
     "ingest_events",

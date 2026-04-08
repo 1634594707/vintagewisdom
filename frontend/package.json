@@ -1,6 +1,6 @@
 {
   "name": "frontend",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -17,7 +17,6 @@
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "reactflow": "^11.11.4",
     "sigma": "^3.0.1"
   },
   "devDependencies": {
