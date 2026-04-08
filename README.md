@@ -28,7 +28,7 @@ uv sync --extra dev --extra web --extra ingest
 如果不用 `uv`：
 
 ```bash
-pip install -e ".[dev,web,ingest]"
+pip3 install -e ".[dev,web,ingest]"
 ```
 
 ## 本地覆盖配置

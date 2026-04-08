@@ -18,7 +18,10 @@ pnpm start
 
 ## 环境变量
 
-- `NEXT_PUBLIC_API_BASE`: 后端 API 地址，默认假设为 `http://127.0.0.1:8000`
+- `NEXT_PUBLIC_API_BASE`: （可选）浏览器端直接请求的 API 地址；未设置时默认使用同源 `/api`
+- `API_BASE`: （推荐）Next.js 服务端代理目标地址；默认 `http://127.0.0.1:8000`
+
+默认行为：前端请求 `/api/*`，再由 Next.js rewrite 转发到 `API_BASE`，避免线上误连 `127.0.0.1`。
 
 ## 说明
 
