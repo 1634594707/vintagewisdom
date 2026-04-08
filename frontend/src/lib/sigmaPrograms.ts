@@ -1,5 +1,57 @@
 import type { NodeDisplayData, RenderParams } from "sigma/types";
 
+type UniformMap = Record<string, WebGLUniformLocation | null | undefined>;
+
+interface SigmaProgramLike {
+  array: Float32Array | number[];
+  gl?: WebGLRenderingContext;
+  program?: WebGLProgram;
+  uniformLocations?: UniformMap;
+  verticesCount?: number;
+}
+
+interface SigmaProgramConstructor {
+  new (...args: unknown[]): SigmaProgramLike;
+}
+
+interface SigmaRenderingModule {
+  Program: SigmaProgramConstructor;
+  NodeCircleProgram?: SigmaProgramConstructor;
+}
+
+interface BorderedNodeDisplayData extends NodeDisplayData {
+  fillColor?: string;
+  borderColor?: string;
+  fillColorRGBA?: number[];
+  borderColorRGBA?: number[];
+  borderWidth?: number;
+  glow?: number;
+}
+
+interface DashedEdgeDisplayData {
+  sourceX?: number;
+  sourceY?: number;
+  targetX?: number;
+  targetY?: number;
+  source?: { x?: number; y?: number };
+  target?: { x?: number; y?: number };
+  thickness?: number;
+  size?: number;
+  colorRGBA?: number[];
+}
+
+type ExtendedRenderParams = RenderParams & {
+  gl?: WebGLRenderingContext;
+  uniformLocations?: UniformMap;
+  matrix?: Float32Array | number[];
+  program?: WebGLProgram;
+};
+
+type SigmaRenderExtras = {
+  ratio?: number;
+  pixelRatio?: number;
+};
+
 const BORDERED_NODE_VERT = `
 attribute vec2 a_position;
 attribute float a_size;
@@ -66,13 +118,19 @@ void main() {
 `;
 
 export async function loadBorderedNodeProgram() {
-  const mod = await import("sigma/rendering");
-  const ProgramBase = (mod as any).Program;
+  const mod = (await import("sigma/rendering")) as unknown as SigmaRenderingModule;
+  const ProgramBase = mod.Program;
 
-  return class BorderedNodeProgram extends ProgramBase {
-    constructor(...args: any[]) {
+  return class BorderedNodeProgram extends ProgramBase implements SigmaProgramLike {
+    declare array: Float32Array | number[];
+    declare gl?: WebGLRenderingContext;
+    declare program?: WebGLProgram;
+    declare uniformLocations?: UniformMap;
+    declare verticesCount?: number;
+
+    constructor(...args: unknown[]) {
       super(...args);
-      if (!(this as any).gl && args.length) (this as any).gl = args[0];
+      if (!this.gl && args.length) this.gl = args[0] as WebGLRenderingContext;
     }
 
     static getDefinition() {
@@ -98,27 +156,27 @@ export async function loadBorderedNodeProgram() {
     }
 
     getDefinition() {
-      return (this.constructor as any).getDefinition();
+      return (this.constructor as typeof BorderedNodeProgram).getDefinition();
     }
 
-    processVisibleItem(offset: number, data: NodeDisplayData) {
+    processVisibleItem(offset: number, data: BorderedNodeDisplayData) {
       const a = this.array;
 
       const x = data.x;
       const y = data.y;
       const size = data.size || 4;
 
-      const fill = (data as any).fillColor || (data as any).color;
-      const border = (data as any).borderColor || (data as any).color;
+      const fill = data.fillColor || data.color;
+      const border = data.borderColor || data.color;
 
       void fill;
       void border;
 
-      const fillRGBA: number[] = (data as any).fillColorRGBA || [156, 163, 175, 255];
-      const borderRGBA: number[] = (data as any).borderColorRGBA || fillRGBA;
+      const fillRGBA: number[] = data.fillColorRGBA || [156, 163, 175, 255];
+      const borderRGBA: number[] = data.borderColorRGBA || fillRGBA;
 
-      const borderWidth = (data as any).borderWidth ?? 1.5;
-      const glow = (data as any).glow ?? 0.0;
+      const borderWidth = data.borderWidth ?? 1.5;
+      const glow = data.glow ?? 0.0;
 
       let i = offset;
       a[i++] = x;
@@ -143,31 +201,40 @@ export async function loadBorderedNodeProgram() {
       this.processVisibleItem(offset, data);
     }
 
-    setUniforms(params: RenderParams) {
-      const gl = ((params as any).gl || (this as any).gl) as WebGLRenderingContext | undefined;
+    setUniforms(params: ExtendedRenderParams) {
+      const gl = params.gl || this.gl;
       if (!gl) return;
-      const uniforms = ((this as any).uniformLocations || (params as any).uniformLocations || {}) as any;
-      const matrix = (params as any).matrix;
+      const uniforms = this.uniformLocations || params.uniformLocations || {};
+      const matrix = params.matrix;
+      const renderExtras = params as ExtendedRenderParams & SigmaRenderExtras;
       if (!uniforms.u_matrix || !matrix) return;
       gl.uniformMatrix3fv(uniforms.u_matrix, false, matrix);
-      if (uniforms.u_ratio) gl.uniform1f(uniforms.u_ratio, (params as any).ratio ?? 1);
-      if (uniforms.u_pixelRatio) gl.uniform1f(uniforms.u_pixelRatio, (params as any).pixelRatio ?? 1);
+      if (uniforms.u_ratio) gl.uniform1f(uniforms.u_ratio, renderExtras.ratio ?? 1);
+      if (uniforms.u_pixelRatio) gl.uniform1f(uniforms.u_pixelRatio, renderExtras.pixelRatio ?? 1);
     }
 
-    draw(params: RenderParams) {
-      const gl = ((params as any).gl || (this as any).gl) as WebGLRenderingContext | undefined;
+    draw(params: ExtendedRenderParams) {
+      const gl = params.gl || this.gl;
       if (!gl) return;
-      const program = ((this as any).program || (params as any).program) as WebGLProgram | undefined;
+      const program = this.program || params.program;
       if (program) gl.useProgram(program);
       this.setUniforms(params);
-      gl.drawArrays(gl.POINTS, 0, (this as any).verticesCount || 0);
+      gl.drawArrays(gl.POINTS, 0, this.verticesCount || 0);
     }
   };
 }
 
+export async function loadCircleNodeProgram() {
+  const mod = (await import("sigma/rendering")) as unknown as SigmaRenderingModule;
+  if (!mod.NodeCircleProgram) {
+    throw new Error("Sigma NodeCircleProgram is unavailable");
+  }
+  return mod.NodeCircleProgram;
+}
+
 export async function loadDashedEdgeProgram() {
-  const mod = await import("sigma/rendering");
-  const ProgramBase = (mod as any).Program;
+  const mod = (await import("sigma/rendering")) as unknown as SigmaRenderingModule;
+  const ProgramBase = mod.Program;
 
   const vert = `
 attribute vec2 a_position;
@@ -205,10 +272,16 @@ void main() {
 }
 `;
 
-  return class DashedEdgeProgram extends ProgramBase {
-    constructor(...args: any[]) {
+  return class DashedEdgeProgram extends ProgramBase implements SigmaProgramLike {
+    declare array: Float32Array | number[];
+    declare gl?: WebGLRenderingContext;
+    declare program?: WebGLProgram;
+    declare uniformLocations?: UniformMap;
+    declare verticesCount?: number;
+
+    constructor(...args: unknown[]) {
       super(...args);
-      if (!(this as any).gl && args.length) (this as any).gl = args[0];
+      if (!this.gl && args.length) this.gl = args[0] as WebGLRenderingContext;
     }
 
     static getDefinition() {
@@ -232,10 +305,10 @@ void main() {
     }
 
     getDefinition() {
-      return (this.constructor as any).getDefinition();
+      return (this.constructor as typeof DashedEdgeProgram).getDefinition();
     }
 
-    processVisibleItem(offset: number, data: any) {
+    processVisibleItem(offset: number, data: DashedEdgeDisplayData) {
       const a = this.array;
 
       const sx = data.sourceX ?? data.source?.x ?? 0;
@@ -315,29 +388,30 @@ void main() {
       a[i++] = rgba[3];
     }
 
-    process(offset: number, data: any) {
+    process(offset: number, data: DashedEdgeDisplayData) {
       this.processVisibleItem(offset, data);
     }
 
-    setUniforms(params: RenderParams) {
-      const gl = ((params as any).gl || (this as any).gl) as WebGLRenderingContext | undefined;
+    setUniforms(params: ExtendedRenderParams) {
+      const gl = params.gl || this.gl;
       if (!gl) return;
-      const uniforms = ((this as any).uniformLocations || (params as any).uniformLocations || {}) as any;
-      const matrix = (params as any).matrix;
+      const uniforms = this.uniformLocations || params.uniformLocations || {};
+      const matrix = params.matrix;
+      const renderExtras = params as ExtendedRenderParams & SigmaRenderExtras;
       if (uniforms.u_matrix && matrix) gl.uniformMatrix3fv(uniforms.u_matrix, false, matrix);
-      const ratio = (params as any).ratio ?? 1;
+      const ratio = renderExtras.ratio ?? 1;
       if (uniforms.u_ratio) gl.uniform1f(uniforms.u_ratio, ratio);
       if (uniforms.u_dashCount) gl.uniform1f(uniforms.u_dashCount, Math.max(6, Math.min(18, 12 / Math.max(0.6, Math.min(1.8, ratio)))));
       if (uniforms.u_dashFill) gl.uniform1f(uniforms.u_dashFill, 0.55);
     }
 
-    draw(params: RenderParams) {
-      const gl = ((params as any).gl || (this as any).gl) as WebGLRenderingContext | undefined;
+    draw(params: ExtendedRenderParams) {
+      const gl = params.gl || this.gl;
       if (!gl) return;
-      const program = ((this as any).program || (params as any).program) as WebGLProgram | undefined;
+      const program = this.program || params.program;
       if (program) gl.useProgram(program);
       this.setUniforms(params);
-      gl.drawArrays(gl.TRIANGLES, 0, (this as any).verticesCount || 0);
+      gl.drawArrays(gl.TRIANGLES, 0, this.verticesCount || 0);
     }
   };
 }

@@ -4,10 +4,11 @@
 
 import sqlite3
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 from threading import Lock
+
+from ..utils.helpers import utc_now_iso
 
 
 class TaskStore:
@@ -58,7 +59,7 @@ class TaskStore:
         """创建新任务"""
         with self._lock:
             conn = sqlite3.connect(self.path, check_same_thread=False)
-            now = datetime.utcnow().isoformat()
+            now = utc_now_iso()
             conn.execute(
                 """INSERT INTO import_tasks 
                    (task_id, status, total_cases, processed_cases, stage, stage_done, stage_total, created_at, updated_at)
@@ -72,7 +73,7 @@ class TaskStore:
         """更新任务阶段与阶段进度（不影响 processed_cases/total_cases）。"""
         with self._lock:
             conn = sqlite3.connect(self.path, check_same_thread=False)
-            now = datetime.utcnow().isoformat()
+            now = utc_now_iso()
             conn.execute(
                 """UPDATE import_tasks
                    SET stage = ?,
@@ -96,7 +97,7 @@ class TaskStore:
         """更新任务进度"""
         with self._lock:
             conn = sqlite3.connect(self.path, check_same_thread=False)
-            now = datetime.utcnow().isoformat()
+            now = utc_now_iso()
             conn.execute(
                 """UPDATE import_tasks 
                    SET processed_cases = ?, 
@@ -119,7 +120,7 @@ class TaskStore:
         """更新任务状态"""
         with self._lock:
             conn = sqlite3.connect(self.path, check_same_thread=False)
-            now = datetime.utcnow().isoformat()
+            now = utc_now_iso()
             result_json = json.dumps(result, ensure_ascii=False) if result else None
             conn.execute(
                 """UPDATE import_tasks 

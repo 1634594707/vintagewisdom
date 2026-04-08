@@ -1,6 +1,7 @@
 declare module "@sigma/edge-curve" {
-  const mod: any;
+  const mod: unknown;
   export default mod;
-  export const EdgeCurveProgram: any;
-  export const EdgeCurve: any;
+  export const EdgeCurveProgram: unknown;
+  export const EdgeCurve: unknown;
+  export function createEdgeCurveProgram(): unknown;
 }

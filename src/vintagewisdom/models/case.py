@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..utils.helpers import utc_now
+
 
 class Case(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -18,5 +20,6 @@ class Case(BaseModel):
     lesson_core: str | None = None
     confidence: str | None = None
     domain_tags: str | None = None
-    created_at: datetime | None = Field(default_factory=datetime.utcnow)
-    updated_at: datetime | None = Field(default_factory=datetime.utcnow)
+    tags: list[str] | None = None  # 新增标签字段
+    created_at: datetime | None = Field(default_factory=utc_now)
+    updated_at: datetime | None = Field(default_factory=utc_now)

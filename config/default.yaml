@@ -40,6 +40,14 @@ graphrag:
   retrieval:
     top_k: 20
 
+ai:
+  provider: "ollama" # ollama | api
+  model: "deepseek-r1:7b"
+  api_base: ""
+  api_key: ""
+  timeout_s: 30
+  retries: 1
+
 retrieval:
   top_k: 5
 
@@ -64,4 +72,26 @@ bias_detection:
 plugins:
   user_dir: "./plugins"
   disabled: []
-  config: {}
+  config:
+    ai:
+      redteam:
+        mode: "llm" # llm | template
+        llm:
+          max_recommendations: 6
+          max_layers: 6
+      reasoning:
+        mode: "rule" # llm | rule
+    bias:
+      detector:
+        mode: "heuristic" # llm | heuristic
+    evidence:
+      builder:
+        max_cases: 5
+        max_snippets: 8
+        snippet_chars: 240
+        kg:
+          enabled: true
+          max_paths: 6
+          depth: 1
+          max_entities: 120
+          max_relations: 200

@@ -2,10 +2,9 @@ from __future__ import annotations
 
 
 def run_tui() -> None:
-    from datetime import datetime
-
     from ..core.app import VintageWisdomApp
     from ..models.case import Case
+    from ..utils.helpers import utc_now
 
     app = VintageWisdomApp()
     app.initialize()
@@ -65,7 +64,7 @@ def run_tui() -> None:
                 if not cid or not title:
                     print("id/title required")
                     continue
-                now = datetime.utcnow()
+                now = utc_now()
                 engine.add_case(
                     Case(
                         id=cid,

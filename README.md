@@ -1,125 +1,73 @@
-# VintageWisdom - 个人历史教训复用系统
+# VintageWisdom
 
-> **让过去的智慧照亮未来的决策**
+VintageWisdom 是一个面向历史案例复用的个人决策支持系统。
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+它把案例沉淀、相似检索、决策查询、知识图谱和 AI 辅助分析放在同一个工作流里，方便你把过去的经验真正变成可复用的判断资产。
 
----
+## 当前能力
 
-## 简介
+- 本地保存案例、决策记录与导入任务
+- 提供 FastAPI Web API
+- 提供 Next.js 前端工作台
+- 支持 CSV、JSON、PDF、DOCX 导入
+- 支持异步 JSON 导入和任务进度查询
+- 支持案例图谱 / 知识图谱展示
+- 支持 AI 配置切换，本地 Ollama 和兼容 OpenAI 的远程接口都可接入
 
-VintageWisdom 是一个**个人决策支持系统**，帮助你结构化存储历史决策案例，通过AI增强的检索与推演能力，在面临新决策时快速找到相关经验教训，避免重复犯错。
+## 技术栈
 
-### 核心特点
+- 后端: Python 3.10+, FastAPI, Pydantic
+- 前端: Next.js 16, React 19, Tailwind CSS 4, Sigma.js
+- 存储: SQLite
+- 可选能力: `pypdf`, `python-docx`, `neo4j`, `redis`, `qdrant`
 
-- **完全本地化** - 所有数据存储在本地，保护隐私
-- **AI增强** - 多标签领域分类、智能检索、因果推演（规划中）
-- **跨领域迁移** - 发现技术/商业/政治等领域的深层相似性
-- **持续进化** - 越用越聪明，形成个人决策理论
+## 环境要求
 
-### 当前已实现（与代码同步）
+- Python `>= 3.10`
+- Node.js `>= 20`
+- `pnpm`
+- 推荐使用 `uv`
 
-- **Web API（FastAPI）** - 案例列表/查询/导入/图谱等接口
-- **前端 Dashboard（Next.js + Sigma.js）** - 导入页、决策查询页、知识图谱交互
-- **异步 JSON 导入** - 任务化导入 + 分阶段进度（import / classify / kg）
-- **4 主域多标签分类** - HIS / FIN / CAR / TEC（支持二级 code），结果落库到 `domain_tags`
-- **图谱强弱可视化** - 边强度统一为 `edge.strength`；KG 同对实体多关系聚合（策略 C：`1-∏(1-conf)`）
+## 快速启动
 
----
+### 1. 安装后端依赖
 
-## 快速开始
-
-### 安装
+推荐:
 
 ```bash
-# 克隆仓库
-git clone https://github.com/yourusername/vintagewisdom.git
-cd vintagewisdom
-
-# 使用 uv 安装（推荐）
-uv sync
-
-# 或使用 pdm
-pdm install
-
-# 或使用 pip
-pip install -e ".[dev]"
+uv sync --extra dev --extra web --extra ingest
 ```
 
-### 初始化
+如果你不用 `uv`:
 
 ```bash
-# 初始化本地数据存储（默认在 data/ 下创建 SQLite）
+pip install -e ".[dev,web,ingest]"
+```
+
+### 2. 初始化本地数据库
+
+```bash
 python -m vintagewisdom init
-# 或（安装后）
+```
+
+或者:
+
+```bash
 vw init
 ```
 
-### 运行
+### 3. 启动后端 API
 
 ```bash
-# 当前以 Web + 前端为主；CLI 可用于初始化/基础命令
-
-# 使用命令行查询
-vw query "我应该接受这个offer吗？"
-
-# 添加新案例（示例）
-vw add-case \
-  --id case_001 \
-  --domain career \
-  --title "接受 offer 的权衡" \
-  --description "两个选择：接受/拒绝" \
-  --lesson-core "明确优先级与可逆性"
-
-# 查看统计
-vw stats
+python -m uvicorn vintagewisdom.web.app:create_app --factory --host 127.0.0.1 --port 8000 --reload
 ```
 
-### 批量导入（CSV / PDF / Word）
+启动后访问:
 
-```bash
-# 从单个 CSV 导入
-vw import-csv --file ./cases.csv
+- API 文档: `http://127.0.0.1:8000/docs`
+- 健康检查: `http://127.0.0.1:8000/health`
 
-# 自动扫描目录并导入新 CSV（按文件 sha256 幂等去重）
-vw scan-csv --dir ./imports --once
-# 或持续扫描
-vw scan-csv --dir ./imports --interval 5
-
-# 抽取 PDF/DOCX 文本并入库（按文件 sha256 幂等去重）
-# 需要安装可选依赖：
-pip install -e ".[ingest]"
-
-vw ingest-doc --file ./docs/a.pdf --type auto
-vw ingest-doc --file ./docs/a.docx --type auto
-```
-
-### Web API（供前端调用）
-
-安装并启动：
-
-```bash
-pip install -e ".[web]"
-python -m uvicorn vintagewisdom.web.app:create_app --factory --host 127.0.0.1 --port 8000
-```
-
-常用接口：
-
-- **GET `/stats`** 统计
-- **GET `/cases`** 案例列表
-- **POST `/query`** 决策查询（JSON：`{"text": "..."}`）
-- **GET `/graph`** 知识图谱（返回 `nodes/edges`）
-- **POST `/ingest/json/async`** 异步 JSON 导入（返回 task_id，轮询 `/tasks/{task_id}`）
-
-### 前端（仪表盘 / 决策查询 / 知识图谱）
-
-前端位于 `frontend/`，默认读取后端：
-
-- `NEXT_PUBLIC_API_BASE`（未设置则默认 `http://127.0.0.1:8000`）
-
-启动开发环境：
+### 4. 启动前端
 
 ```bash
 cd frontend
@@ -127,224 +75,137 @@ pnpm install
 pnpm dev
 ```
 
-访问：
+说明:
 
-- `http://localhost:3000/query` 决策查询
-- `http://localhost:3000/graph` 知识图谱（节点/边可缩放拖拽，点击节点查看关联数据）
+- `pnpm dev` 现在默认走 `webpack`，用于规避 Windows 下 Turbopack 偶发的资源不足 panic
+- 如果你想手动试 Turbopack，可以用 `pnpm run dev:turbo`
 
----
+默认访问:
 
-## 使用场景
+- 前端首页: `http://127.0.0.1:3000`
+- 决策查询: `http://127.0.0.1:3000/query`
+- 知识图谱: `http://127.0.0.1:3000/graph`
 
-### 场景1：决策前快速参考
-
-```
-你："我是一个A轮公司CTO，技术债很重，想重构但业务压力大"
-
-系统：
-┌──────────────────────────────────────────┐
-│  【高度匹配案例】                          │
-│  1. 某SaaS公司重构失败 (2021)              │
-│     相似度: 92%  |  领域: tech+business    │
-│     关键差异: 你处于A轮，案例为B轮          │
-│                                          │
-│  2. 某电商公司渐进式重构 (2019)             │
-│     相似度: 85%  |  结果: 成功              │
-│                                          │
-│  【风险推演】                              │
-│  若立即全面重构：                          │
-│    3个月内：开发停滞，客户投诉上升            │
-│    6个月内：核心员工流失，融资受阻            │
-│    历史概率：基于3个相似案例，70%失败        │
-│                                          │
-│  【建议路径】                              │
-│  方案A: 绞杀者策略（推荐）                   │
-│    - 新功能用新架构，旧系统逐步替换           │
-│    - 关键检查项:                            │
-│      ☐ 是否划定"冻结区"，旧代码只修不增？    │
-│      ☐ 新业务是否能在新架构上跑通MVP？       │
-└──────────────────────────────────────────┘
-```
-
-### 场景2：记录决策形成闭环
+如果后端不是跑在 `127.0.0.1:8000`，先设置环境变量:
 
 ```bash
-# 记录当前决策
-vw log-decision \
-  --id dec_001 \
-  --query "是否接受新工作 offer" \
-  --context "薪资基本符合预期，但希望明确晋升路径" \
-  --choice "先谈判再决定" \
-  --predict "6个月内适应新环境"
+NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000
+```
 
-# 过一段时间后回填结果
-vw evaluate-decision \
-  --id dec_001 \
-  --outcome "基本符合预期，但晋升比想象慢"
+PowerShell:
 
-# 查看统计（会显示已评估数量）
+```powershell
+$env:NEXT_PUBLIC_API_BASE = "http://127.0.0.1:8000"
+pnpm dev
+```
+
+## 推荐启动顺序
+
+开发时建议按下面顺序启动:
+
+1. 安装 Python 依赖
+2. 执行 `vw init`
+3. 启动后端 API
+4. 进入 `frontend/` 启动前端
+5. 打开 `http://127.0.0.1:3000`
+
+## 只启动后端
+
+如果你只想先验证 API:
+
+```bash
+uv sync --extra web --extra ingest
+python -m vintagewisdom init
+python -m uvicorn vintagewisdom.web.app:create_app --factory --host 127.0.0.1 --port 8000 --reload
+```
+
+## 只使用 CLI
+
+项目也支持命令行操作。
+
+### 查询
+
+```bash
+vw query "Should I accept this offer?"
+```
+
+### 查看统计
+
+```bash
 vw stats
 ```
 
-### 场景3：发现个人决策模式
+### 新增案例
 
 ```bash
-# 当前版本暂未提供自动报告生成命令。
-# 你可以通过积累案例后使用 stats + query 辅助复盘。
-
-# 输出：
-┌─────────────────────────────────────────┐
-│  你的决策理论 v1.0                       │
-├─────────────────────────────────────────┤
-│                                         │
-│  【高胜率情境】                          │
-│  • 信息完整度>80%                        │
-│  • 时间压力<中等                         │
-│  • 可逆性高                              │
-│  胜率: 85%                               │
-│                                         │
-│  【危险信号组合】                         │
-│  • 时间压力高 + 情绪标记激动 → 后悔率85%  │
-│  • 涉及人际冲突 + 深夜时段 → 后悔率78%    │
-│                                         │
-│  【你的独特优势】                         │
-│  • 技术架构决策胜率82%（高于平均70%）      │
-│                                         │
-│  【系统性弱点】                          │
-│  • 涉及"拒绝他人"的决策胜率仅45%          │
-│    原因：过度考虑关系维护                  │
-└─────────────────────────────────────────┘
+vw add-case \
+  --id case_001 \
+  --domain career \
+  --title "Accept offer or not" \
+  --description "Two options with different growth paths" \
+  --lesson-core "Clarify priority before choosing"
 ```
 
----
+### 导入 CSV
 
-## 核心功能
-
-### 1. 混合检索
-
-结合向量相似度、约束条件过滤、知识图谱关联，三层召回精准匹配相关案例。
-
-```python
-# 示例：检索相关案例
-results = engine.retrieve(
-    query="技术债重构困境",
-    constraints={"stage": "A轮", "role": "CTO"},
-    top_k=5
-)
+```bash
+vw import-csv --file ./cases.csv
 ```
 
-### 2. 因果推演
+### 导入文档
 
-自动挖掘案例中的因果链，识别关键路径和瓶颈节点。
-
-```
-技术债务积累 → 开发速度下降 → 团队士气低落 → 核心员工离职 → 项目延期
-     │              │              │
-     └──────────────┴──────────────┘
-           最佳干预点：团队士气阶段
+```bash
+vw ingest-doc --file ./docs/a.pdf --type auto
+vw ingest-doc --file ./docs/a.docx --type auto
 ```
 
-### 3. AI红队对抗
+## 常用 API
 
-AI扮演反对者角色，系统性挑战你的决策假设。
+- `GET /stats`
+- `GET /cases`
+- `GET /cases/{case_id}`
+- `POST /query`
+- `GET /graph`
+- `POST /decisions`
+- `POST /ingest/json/async`
+- `GET /tasks/{task_id}`
+- `GET /ai/config`
+- `POST /ai/config`
 
-- **事实基础攻击** - 质疑数据来源
-- **逻辑结构攻击** - 检验推理链条
-- **隐含假设攻击** - 暴露未明说的前提
-- **极端情境攻击** - 测试最坏情况预案
-- **机会成本攻击** - 探索替代选项
+## 常用开发命令
 
-### 4. "未来你"对话
+### 后端
 
-AI生成成功、失败、中立三个版本的"未来你"，帮助你从时间透视的角度审视当前决策。
-
-```
-成功未来你："接受这份工作是我职业生涯最好的决定之一，
-             但关键是入职第3个月我主动调整了职责范围..."
-
-失败未来你："我低估了'高压'的复合效应，
-             第4个月开始失眠，第6个月失去阅读专注力..."
-```
-
-### 5. 偏见检测
-
-实时检测认知偏见，防止决策偏差。
-
-| 偏见类型 | 检测信号 | 干预方式 |
-|---------|---------|---------|
-| 确认偏误 | 只看支持证据 | 强制呈现反方案例 |
-| 计划谬误 | 持续低估时间 | 注入历史基础率 |
-| 沉没成本 | "已经投入了" | 清零视角重构 |
-| 近因效应 | 忽视早期案例 | 时间权重调整 |
-
----
-
-## 项目结构
-
-```
-vintagewisdom/
-├── src/vintagewisdom/          # 后端源代码
-│   ├── web/                   # FastAPI Web API
-│   ├── core/                  # 核心流程（检索/异步导入）
-│   ├── storage/               # SQLite/任务进度等
-│   ├── knowledge/             # 领域体系/知识图谱（抽取/存储/聚合）
-│   ├── ai/                    # 本地 Ollama 分类器等
-│   ├── models/                # 数据模型
-│   └── ...
-├── frontend/                   # 前端（Next.js）
-├── data/                       # 本地数据（SQLite db 等）
-├── config/                     # 配置文件
-├── tests/                      # 测试
-└── docs/                       # 文档
+```bash
+pytest
+ruff check .
+mypy src/
 ```
 
-详细结构见 [STRUCTURE.md](STRUCTURE.md)
+### 前端
 
----
-
-## 技术栈
-
-| 层级 | 技术 | 用途 |
-|------|------|------|
-| **界面** | 终端 CLI（argparse） | 查询/录入/统计 |
-| **存储** | SQLite（本地文件） | 案例持久化 |
-| **配置** | YAML | 默认配置 + 用户覆盖 |
-| **数据模型** | Pydantic v2 | 数据校验 |
-| **语言** | Python 3.10+ | 主要开发语言 |
-
-详细设计见 [DESIGN.md](DESIGN.md)
-
----
+```bash
+cd frontend
+pnpm lint
+pnpm build
+```
 
 ## 配置
 
-### 基础配置
+主要配置文件:
 
-编辑 `config/user.yaml`：
+- 默认配置: [config/default.yaml](d:/Administrator/Desktop/Full%20Stack/VintageWisdom/config/default.yaml)
+- 用户配置: [config/user.yaml](d:/Administrator/Desktop/Full%20Stack/VintageWisdom/config/user.yaml)
 
-```yaml
-user:
-  name: "你的名字"
-  preferred_domain: ["tech", "business"]
-
-preferences:
-  compression_level: "standard"  # minimal/standard/deep/archaeology
-  redteam_intensity: "medium"    # low/medium/high
-  language: "zh"
-
-privacy:
-  local_only: true
-```
-
-### 环境变量
+常用环境变量:
 
 ```bash
-export VW_DATA_DIR="/path/to/data"
-export VW_CONFIG_DIR="/path/to/config"
-export VW_LOG_LEVEL="INFO"
+VW_DATA_DIR=/path/to/data
+VW_CONFIG_DIR=/path/to/config
+VW_LOG_LEVEL=INFO
 ```
 
-Windows（PowerShell）示例：
+PowerShell:
 
 ```powershell
 $env:VW_DATA_DIR = "D:\\path\\to\\data"
@@ -352,82 +213,52 @@ $env:VW_CONFIG_DIR = "D:\\path\\to\\config"
 $env:VW_LOG_LEVEL = "INFO"
 ```
 
----
+## 目录结构
 
-## 开发
-
-### 设置开发环境
-
-```bash
-# 安装开发依赖
-uv sync --extra dev
-
-# 安装 pre-commit
-pre-commit install
-
-# 运行测试
-pytest
-
-# 代码检查
-ruff check .
-mypy src/
+```text
+VintageWisdom/
+├─ src/vintagewisdom/      Python 后端
+├─ frontend/               Next.js 前端
+├─ config/                 配置文件
+├─ data/                   本地数据目录
+├─ tests/                  测试
+├─ docs/                   文档
+└─ README.md
 ```
 
-### 项目演进路线
+## 你现在最短的启动方法
 
-1. **习惯养成（0-3月）** - 建立决策记录习惯
-2. **模式积累（3-12月）** - 发现个人决策模式
-3. **深度校准（1-2年）** - 系统成为你的"外部自我"
-4. **共生进化（2年+）** - 形成独特决策方法论
+如果你只是想马上跑起来，用这组命令就够了:
 
----
+```bash
+uv sync --extra dev --extra web --extra ingest
+python -m vintagewisdom init
+python -m uvicorn vintagewisdom.web.app:create_app --factory --host 127.0.0.1 --port 8000 --reload
+```
 
-## 数据隐私
+新开一个终端:
 
-- **本地优先** - 所有案例数据存储在本地SQLite
-- **可选联网** - 复杂推理可选择性使用云端API
-- **加密备份** - 支持加密备份到私有云
-- **数据导出** - 随时导出所有数据
+```bash
+cd frontend
+pnpm install
+pnpm dev
+```
 
----
+然后打开:
 
-## 贡献
+```text
+http://127.0.0.1:3000
+```
 
-欢迎贡献！请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解如何参与。
+## 说明
 
-### 贡献方式
+- 当前主工作流是 Web API + 前端
+- CLI 更适合初始化、批量导入和快速排查
+- `pnpm lint` 目前还有一批图谱底层历史类型问题，主要集中在 Sigma 相关文件；`pnpm build` 和 `pnpm exec tsc --noEmit` 已可通过
 
-- 🐛 提交 Bug 报告
-- 💡 提出新功能建议
-- 📝 改进文档
-- 🔧 提交代码修复
-- 🧪 添加测试用例
+## 相关文档
 
----
-
-## 许可证
-
-[MIT License](LICENSE)
-
----
-
-## 致谢
-
-- 设计灵感来自《思考，快与慢》《创新者的窘境》
-- 因果推理参考 Judea Pearl 的因果推断理论
-- 偏见检测基于 Daniel Kahneman 的认知偏差研究
-
----
-
-## 相关链接
-
-- [设计文档](DESIGN.md)
-- [项目结构](STRUCTURE.md)
-- [用户指南](docs/user-guide/)
-- [API文档](docs/api/)
-
----
-
-<p align="center">
-  <i>"历史不会重复，但会押韵" —— 马克·吐温</i>
-</p>
+- [docs/README.md](d:/Administrator/Desktop/Full%20Stack/VintageWisdom/docs/README.md)
+- [docs/design/UI-DESIGN.md](d:/Administrator/Desktop/Full%20Stack/VintageWisdom/docs/design/UI-DESIGN.md)
+- [docs/architecture/ARCHITECTURE.md](d:/Administrator/Desktop/Full%20Stack/VintageWisdom/docs/architecture/ARCHITECTURE.md)
+- [docs/architecture/STRUCTURE.md](d:/Administrator/Desktop/Full%20Stack/VintageWisdom/docs/architecture/STRUCTURE.md)

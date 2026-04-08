@@ -2,7 +2,7 @@
 
 > 目标：在不破坏现有 CLI/Web API 的前提下，把增强能力升级为 **AI 驱动**（可本地/可云端、可降级），并把数据获取与导入升级为 **可扩展的数据管道**（批量文件 + 爬虫 + 表格处理）。
 
-本文参考 `DESIGN.md` 的演进路线与关键原则（本地优先、可解释性、人机协作边界），并对齐当前已落地的 **插件化骨架**：
+本文参考当前设计规范与演进路线（本地优先、可解释性、人机协作边界），并对齐当前已落地的 **插件化骨架**：
 
 - `VintageWisdomApp` 统一生命周期与配置
 - `EventBus`：`case.added`、`db.case.inserted`、`ingest.*`、`decision.before/decision.after`
@@ -30,7 +30,7 @@
 
 ## 1. AI 驱动版本：从“模板增强”到“证据约束的多步推理”
 
-### 1.1 核心原则（与 DESIGN.md 对齐）
+### 1.1 核心原则（与当前设计规范对齐）
 
 - **本地优先，可选联网**：默认走本地 LLM（Ollama/LM Studio），失败再降级到规则/模板。
 - **可解释性优先**：任何 AI 输出必须带 evidence 引用（来自 case、KG、导入文本片段），并可追溯。
@@ -80,7 +80,7 @@ ai:
 
 ### 1.4 AI 红队（ai.redteam）升级方案
 
-目标：把 DESIGN.md 的“分层攻击”落到代码，并且 **每一层都引用 evidence**。
+目标：把“分层攻击”的思路落到代码，并且 **每一层都引用 evidence**。
 
 实现策略（插件 `ai.redteam.llm`）：
 
@@ -162,7 +162,7 @@ ai:
 
 ### 2.3 爬虫（采集层）
 
-按 DESIGN.md 推荐：`crawl4ai + playwright`。
+按当前规划推荐：`crawl4ai + playwright`。
 
 建议作为插件 `ingest.crawler`：
 

@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List
 
+from ..utils.helpers import utc_now
+
 
 @dataclass(frozen=True)
 class Event:
@@ -29,7 +31,7 @@ class EventBus:
             return
 
     def emit(self, event_name: str, data: Dict[str, Any] | None = None) -> None:
-        event = Event(name=event_name, data=data or {}, timestamp=datetime.utcnow())
+        event = Event(name=event_name, data=data or {}, timestamp=utc_now())
         for handler in list(self._handlers.get(event_name, [])):
             try:
                 handler(event)

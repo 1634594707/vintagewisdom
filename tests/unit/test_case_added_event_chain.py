@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 
-def test_case_added_event_chain_does_not_crash() -> None:
-    from datetime import datetime
-
+def test_case_added_event_chain_does_not_crash(tmp_path, monkeypatch) -> None:
     from vintagewisdom.core.app import VintageWisdomApp
     from vintagewisdom.core.events import events
     from vintagewisdom.models.case import Case
+    from vintagewisdom.utils.helpers import utc_now
+
+    monkeypatch.setenv("VW_DATA_DIR", str(tmp_path / "data"))
 
     app = VintageWisdomApp()
     app.initialize()
@@ -22,13 +23,14 @@ def test_case_added_event_chain_does_not_crash() -> None:
     events.on("case.added", on_case_added)
     events.on("db.case.inserted", on_db_case_inserted)
 
+    now = utc_now()
     c = Case(
-        id=f"case_test_{int(datetime.utcnow().timestamp())}",
+        id=f"case_test_{int(now.timestamp())}",
         domain="GENERAL",
         title="Test Case",
         description="Just a test",
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=now,
+        updated_at=now,
     )
 
     # Should not raise even if AI/KG plugins are enabled but unavailable.

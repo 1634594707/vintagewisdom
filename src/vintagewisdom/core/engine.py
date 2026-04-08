@@ -39,12 +39,16 @@ class Engine:
         ai_model = self.config.get("ai.model", "qwen3.5:4b")
         ai_api_key = self.config.get("ai.api_key", "")
         ai_api_base = self.config.get("ai.api_base", "")
+        ai_timeout = self.config.get("ai.timeout_s", 30)
+        ai_retries = self.config.get("ai.retries", 1)
         
         self.ai_assistant = AIDecisionAssistant(
             provider=ai_provider,
             model=ai_model,
             api_key=ai_api_key if ai_api_key else None,
             api_base=ai_api_base if ai_api_base else None,
+            timeout_s=int(ai_timeout or 30),
+            retries=int(ai_retries or 1),
         )
         
         if self.ai_assistant.check_available():

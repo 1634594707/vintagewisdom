@@ -4,12 +4,113 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { api, type GraphEdge, type GraphNode, type GraphResponse, type KgNodeDetails } from "@/lib/api";
-import { hexToRgbaBytes, loadDashedEdgeProgram } from "@/lib/sigmaPrograms";
+import { hexToRgbaBytes, loadCircleNodeProgram, loadDashedEdgeProgram } from "@/lib/sigmaPrograms";
 
 import Graph from "graphology";
 import forceAtlas2 from "graphology-layout-forceatlas2";
 
 type EdgeType = "domain_case" | "case_similar" | "cluster_case" | string;
+type SigmaConstructor = new (graph: Graph, container: HTMLElement, settings: SigmaSettings) => SigmaLike;
+
+interface SigmaLike {
+  refresh?: () => void;
+  resize?: () => void;
+  kill?: () => void;
+  setSetting?: (key: string, value: unknown) => void;
+  getCamera?: () => {
+    getState?: () => { ratio?: number };
+    on?: (event: string, callback: () => void) => void;
+  };
+  getMouseCaptor?: () => {
+    on?: (event: string, callback: (event: MouseCaptorEvent) => void) => void;
+  };
+  on: (event: string, callback: (event?: SigmaNodeEvent) => void) => void;
+}
+
+interface SigmaSettings {
+  renderEdgeLabels?: boolean;
+  labelRenderedSizeThreshold?: number;
+  defaultLabelColor?: string;
+  defaultNodeType?: string;
+  zIndex?: boolean;
+  allowInvalidContainer?: boolean;
+  edgeProgramClasses?: Record<string, unknown>;
+  nodeProgramClasses?: Record<string, unknown>;
+  nodeHoverProgramClasses?: Record<string, unknown>;
+  nodeHoverRenderer?: (ctx: CanvasRenderingContext2D, data: SigmaNodeRenderData, settings: LabelRendererSettings) => void;
+}
+
+interface SigmaNodeRenderData {
+  key?: string;
+  id?: string;
+  label?: string;
+  size?: number;
+  x: number;
+  y: number;
+  nodeType?: string;
+  color?: string;
+  originalColor?: string;
+  borderWidth?: number;
+  glow?: number;
+  [key: string]: unknown;
+}
+
+interface LabelRendererSettings {
+  labelFont?: string;
+  labelSize?: number;
+  [key: string]: unknown;
+}
+
+interface SigmaNodeAttributes {
+  color?: string;
+  originalColor?: string;
+  size?: number;
+  zIndex?: number;
+  hidden?: boolean;
+  glow?: number;
+  borderWidth?: number;
+  [key: string]: unknown;
+}
+
+interface SigmaEdgeAttributes {
+  color?: string;
+  originalColor?: string;
+  size?: number;
+  zIndex?: number;
+  hidden?: boolean;
+  type?: string;
+  edgeType?: string;
+  colorRGBA?: [number, number, number, number] | number[];
+  strength?: number;
+  [key: string]: unknown;
+}
+
+interface MouseCaptorEvent {
+  x?: number;
+  y?: number;
+}
+
+interface SigmaNodeEvent {
+  node?: string;
+}
+
+interface WorkerLayoutLike {
+  start?: () => void;
+  stop?: () => void;
+  kill?: () => void;
+}
+
+interface GraphCurveModule {
+  default?: unknown;
+  EdgeCurveProgram?: unknown;
+  EdgeCurve?: unknown;
+  createEdgeCurveProgram?: () => unknown;
+}
+
+interface GraphEdgeWithEvidence extends GraphEdge {
+  strength?: number;
+  confidence?: number;
+}
 
 const THEME = {
   background: "#fafafa",
@@ -135,6 +236,7 @@ function GraphCanvas({
   focusRedEdges,
   similarEdgeColorMode,
   allEdgesColorMode,
+  onNodeClick,
 }: {
   graph: GraphResponse;
   selectedId: string;
@@ -147,11 +249,12 @@ function GraphCanvas({
   focusRedEdges: boolean;
   similarEdgeColorMode: "fixed" | "gradient";
   allEdgesColorMode: "default" | "confidence_gradient";
+  onNodeClick?: (node: GraphNode) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const sigmaRef = useRef<any>(null);
+  const sigmaRef = useRef<SigmaLike | null>(null);
   const graphRef = useRef<Graph | null>(null);
-  const fa2WorkerRef = useRef<any>(null);
+  const fa2WorkerRef = useRef<WorkerLayoutLike | null>(null);
   const stateRef = useRef<{
     selectedId: string;
     hoveredId: string;
@@ -311,18 +414,19 @@ function GraphCanvas({
       if (started) return;
       started = true;
 
-      const mod = await import("sigma");
-      const Sigma = (mod as any).default || (mod as any);
+      const mod = (await import("sigma")) as unknown as { default?: SigmaConstructor };
+      const Sigma = mod.default as SigmaConstructor;
+      const CircleNodeProgram = await loadCircleNodeProgram();
       const DashedEdgeProgram = await loadDashedEdgeProgram();
 
-      let CurveEdgeProgram: any = null;
+      let CurveEdgeProgram: unknown = null;
       try {
-        const cmod = await import("@sigma/edge-curve");
-        const factory = (cmod as any).createEdgeCurveProgram;
+        const cmod = (await import("@sigma/edge-curve")) as GraphCurveModule;
+        const factory = cmod.createEdgeCurveProgram;
         if (typeof factory === "function") {
           CurveEdgeProgram = factory();
         } else {
-          CurveEdgeProgram = (cmod as any).default || (cmod as any).EdgeCurveProgram || (cmod as any).EdgeCurve || null;
+          CurveEdgeProgram = cmod.default || cmod.EdgeCurveProgram || cmod.EdgeCurve || null;
         }
       } catch {}
 
@@ -364,8 +468,9 @@ function GraphCanvas({
           if (!g.hasNode(e.source) || !g.hasNode(e.target)) continue;
           const src = e.source;
           const tgt = e.target;
-          const et = ((e as any).type || (e as any).edge_type || "domain_case") as any;
-          const strength = clamp01((e as any).weight ?? (e as any).score ?? 0.5);
+          const et = (e.type || e.edge_type || "domain_case") as EdgeType;
+          const edgeWithMetrics = e as GraphEdge & { weight?: number; score?: number };
+          const strength = clamp01(edgeWithMetrics.weight ?? edgeWithMetrics.score ?? 0.5);
           const c = edgeColor(et);
           const isSimilar = et === "case_similar";
           const colorRGBA = isSimilar ? withAlpha("#ea580c", 0.62) : rgbaCssToBytes(c);
@@ -373,7 +478,7 @@ function GraphCanvas({
           const baseW = et === "case_similar" ? 1.2 : 1.0;
           const w = strength !== undefined ? baseW + strength * 4.2 : 1.8;
 
-          const key = (e as any).id || `${src}->${tgt}`;
+          const key = e.id || `${src}->${tgt}`;
 
           // Graphology (non-multi) does not allow parallel edges between same node pair.
           // Merge by keeping the strongest visual attributes.
@@ -405,7 +510,7 @@ function GraphCanvas({
           if (g.hasEdge(key)) continue;
           try {
             g.addEdgeWithKey(key, src, tgt, {
-              label: (e as any).label,
+              label: ("label" in e ? (e as GraphEdge & { label?: string }).label : undefined),
               color: c,
               size: isSimilar ? w : Math.max(0.6, w * 0.85),
               edgeType: et,
@@ -429,19 +534,25 @@ function GraphCanvas({
       if (disposed) return;
       graphRef.current = g;
 
-      const edgeProgramClasses: Record<string, any> = {
+      const edgeProgramClasses: Record<string, unknown> = {
         dashed: DashedEdgeProgram,
       };
       if (enableCurves) edgeProgramClasses.curve = CurveEdgeProgram;
+      const nodeProgramClasses: Record<string, unknown> = {
+        circle: CircleNodeProgram,
+      };
 
       const renderer = new Sigma(g, container, {
         renderEdgeLabels: false,
         labelRenderedSizeThreshold: 0,
+        defaultNodeType: "circle",
         defaultLabelColor: "rgba(15,23,42,0.82)",
         zIndex: true,
         allowInvalidContainer: true,
         edgeProgramClasses,
-        nodeHoverRenderer: (ctx: CanvasRenderingContext2D, data: any, settings: any) => {
+        nodeProgramClasses,
+        nodeHoverRenderer: (ctx: CanvasRenderingContext2D, data: SigmaNodeRenderData, settings: LabelRendererSettings) => {
+          void settings;
           const focus = stateRef.current.selectedId || stateRef.current.hoveredId;
           const isFocus = focus && data && data.key === focus;
           const size = data.size || 4;
@@ -464,15 +575,21 @@ function GraphCanvas({
           }
           ctx.restore();
         },
-      } as any);
+      });
       sigmaRef.current = renderer;
+
+      try {
+        renderer.setSetting?.("defaultNodeType", "circle");
+        renderer.setSetting?.("nodeProgramClasses", nodeProgramClasses);
+        renderer.setSetting?.("nodeHoverProgramClasses", nodeProgramClasses);
+      } catch {}
 
       // LOD + focus: reducers (avoid mutating graph in response to hover/click)
       try {
         const nEdges = edgesAll.length;
         const shouldHideEdgesByDefault = nEdges > 2500;
         if (typeof renderer?.setSetting === "function") {
-          renderer.setSetting("nodeReducer", (node: string, attrs: any) => {
+          renderer.setSetting("nodeReducer", (node: string, attrs: SigmaNodeAttributes) => {
             try {
               const { selectedId: sel, hoveredId: hov } = stateRef.current;
               const focus = sel || hov;
@@ -514,7 +631,7 @@ function GraphCanvas({
             }
           });
 
-          renderer.setSetting("edgeReducer", (edge: string, attrs: any) => {
+          renderer.setSetting("edgeReducer", (edge: string, attrs: SigmaEdgeAttributes) => {
             try {
               const { selectedId: sel, hoveredId: hov, showAllEdges: showAll, focusRedEdges: focusRed, similarEdgeColorMode: simMode } =
                 stateRef.current;
@@ -607,19 +724,20 @@ function GraphCanvas({
 
       // Start ForceAtlas2 in a WebWorker to avoid blocking UI
       try {
-        const wmod = await import("graphology-layout-forceatlas2/worker");
-        const FA2Layout = (wmod as any).default || (wmod as any);
+        const wmod = (await import("graphology-layout-forceatlas2/worker")) as unknown as { default?: new (graph: Graph, options: { settings: Record<string, number | boolean>; iterationsPerRender: number }) => WorkerLayoutLike };
+        const FA2Layout = wmod.default;
+        if (!FA2Layout) throw new Error("ForceAtlas2 worker unavailable");
         const nNodes = g.order;
-        const settings = {
+        const layoutSettings = {
           gravity: 0.8,
           scalingRatio: 6,
           strongGravityMode: true,
           slowDown: 2,
         };
         const iterationsPerRender = nNodes > 1200 ? 1 : nNodes > 600 ? 2 : 3;
-        const layout = new FA2Layout(g, { settings, iterationsPerRender });
+        const layout = new FA2Layout(g, { settings: layoutSettings, iterationsPerRender });
         fa2WorkerRef.current = layout;
-        layout.start();
+        layout.start?.();
 
         // Do not keep layout running forever (it causes nodes to drift on interaction).
         // Warm up briefly, then stop for stable UX.
@@ -647,7 +765,7 @@ function GraphCanvas({
       // A2: custom label renderer (label + small type tag)
       try {
         if (typeof renderer?.setSetting === "function") {
-          renderer.setSetting("labelRenderer", (ctx: CanvasRenderingContext2D, data: any, settings: any) => {
+          renderer.setSetting("labelRenderer", (ctx: CanvasRenderingContext2D, data: SigmaNodeRenderData, settings: LabelRendererSettings) => {
             if (!data?.label) return;
 
             if (!stateRef.current.showLabels && !stateRef.current.showTypeChips) return;
@@ -751,13 +869,22 @@ function GraphCanvas({
         }
       } catch {}
 
-      renderer.on("clickNode", (evt: any) => {
+      renderer.on("clickNode", (evt?: SigmaNodeEvent) => {
         const id = evt?.node;
         if (typeof id === "string") {
-          if (!dragRef.current.moved) setSelectedId(id);
+          if (!dragRef.current.moved) {
+            setSelectedId(id);
+            // 触发节点点击回调
+            if (onNodeClick) {
+              const node = graph.nodes.find(n => n.id === id);
+              if (node) {
+                onNodeClick(node);
+              }
+            }
+          }
         }
       });
-      renderer.on("enterNode", (evt: any) => {
+      renderer.on("enterNode", (evt?: SigmaNodeEvent) => {
         const id = evt?.node;
         if (typeof id === "string") setHoveredId(id);
       });
@@ -768,13 +895,13 @@ function GraphCanvas({
       try {
         const mc = renderer.getMouseCaptor?.();
         if (mc?.on) {
-          mc.on("mousedown", (e: any) => {
+          mc.on("mousedown", (e: MouseCaptorEvent) => {
             dragRef.current.down = true;
             dragRef.current.moved = false;
             dragRef.current.x = e?.x ?? 0;
             dragRef.current.y = e?.y ?? 0;
           });
-          mc.on("mousemove", (e: any) => {
+          mc.on("mousemove", (e: MouseCaptorEvent) => {
             if (!dragRef.current.down) return;
             const dx = (e?.x ?? 0) - dragRef.current.x;
             const dy = (e?.y ?? 0) - dragRef.current.y;
@@ -807,7 +934,7 @@ function GraphCanvas({
       sigmaRef.current = null;
       graphRef.current = null;
     };
-  }, [graph.edges, graph.nodes, setHoveredId, setSelectedId]);
+  }, [graph.edges, graph.nodes, setHoveredId, setSelectedId, onNodeClick]);
 
   // Pause layout while a node is selected to avoid "node flying away" effect
   useEffect(() => {
@@ -828,10 +955,12 @@ export default function GraphViewSigma({
   graph,
   isKg,
   onExpandSeed,
+  onNodeClick,
 }: {
   graph: GraphResponse;
   isKg?: boolean;
   onExpandSeed?: (entityId: string) => void;
+  onNodeClick?: (node: GraphNode) => void;
 }) {
   const router = useRouter();
   const [selectedId, setSelectedId] = useState<string>("");
@@ -855,8 +984,6 @@ export default function GraphViewSigma({
   const [caseDetailsLoading, setCaseDetailsLoading] = useState<boolean>(false);
 
   const [kgDetails, setKgDetails] = useState<KgNodeDetails | null>(null);
-  const [kgDetailsLoading, setKgDetailsLoading] = useState<boolean>(false);
-
   const nodesById = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n] as const)), [graph.nodes]);
   const selectedNode = useMemo(() => nodesById.get(selectedId), [nodesById, selectedId]);
 
@@ -900,7 +1027,6 @@ export default function GraphViewSigma({
         setKgDetails(null);
         return;
       }
-      setKgDetailsLoading(true);
       try {
         const d = await api.kgNode(selectedId);
         if (!alive) return;
@@ -908,9 +1034,6 @@ export default function GraphViewSigma({
       } catch {
         if (!alive) return;
         setKgDetails(null);
-      } finally {
-        if (!alive) return;
-        setKgDetailsLoading(false);
       }
     })();
     return () => {
@@ -933,7 +1056,7 @@ export default function GraphViewSigma({
   }, [graph.edges, nodesById, selectedId]);
 
   const attributeEntries = useMemo(() => {
-    const attrs = isKg ? kgDetails?.attributes : (selectedNode as any)?.attributes;
+    const attrs = isKg ? kgDetails?.attributes : selectedNode?.attributes;
     if (!attrs || typeof attrs !== "object") return [] as Array<[string, unknown]>;
     return Object.entries(attrs as Record<string, unknown>)
       .filter(([k]) => k !== "id" && k !== "type" && k !== "label")
@@ -941,7 +1064,7 @@ export default function GraphViewSigma({
   }, [isKg, kgDetails, selectedNode]);
 
   const evidenceItems = useMemo(() => {
-    const edges = connected.edges as any[];
+    const edges = connected.edges as GraphEdgeWithEvidence[];
     const out: Array<{
       edgeId: string;
       relationType: string;
@@ -971,23 +1094,6 @@ export default function GraphViewSigma({
     return out.slice(0, 50);
   }, [connected.edges]);
 
-  const stats = useMemo(() => {
-    if (isKg) {
-      const s = (graph as any)?.stats || {};
-      return {
-        entityCount: typeof s.entity_count === "number" ? s.entity_count : graph.nodes.length,
-        relationCount: typeof s.relation_count === "number" ? s.relation_count : graph.edges.length,
-        evidenceCount: typeof s.evidence_count === "number" ? s.evidence_count : 0,
-      };
-    }
-
-    const domainCount = graph.nodes.filter((n) => n.type === "domain").length;
-    const caseCount = graph.nodes.filter((n) => n.type === "case").length;
-    const clusterCount = graph.nodes.filter((n) => n.type === "cluster").length;
-    const similarCount = graph.edges.filter((e) => e.edge_type === "case_similar").length;
-    return { domainCount, caseCount, clusterCount, similarCount, edgeCount: graph.edges.length };
-  }, [graph.edges, graph.nodes, isKg]);
-
   return (
     <div className="relative h-full min-h-[650px] overflow-hidden bg-[var(--bg-secondary)]">
       <div
@@ -1013,6 +1119,7 @@ export default function GraphViewSigma({
           focusRedEdges={focusRedEdges}
           similarEdgeColorMode={similarEdgeColorMode}
           allEdgesColorMode={allEdgesColorMode}
+          onNodeClick={onNodeClick}
         />
       </div>
 

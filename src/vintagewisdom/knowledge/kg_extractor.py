@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..ai.decision_assistant import AIDecisionAssistant
+from ..utils.helpers import utc_now
 
 
 def _sha1(s: str) -> str:
@@ -93,7 +93,7 @@ def _normalize_and_dedupe(
                 "name": name,
                 "type": et,
                 "attributes": e.get("attributes") if isinstance(e.get("attributes"), dict) else {},
-                "updated_at": e.get("updated_at") or datetime.utcnow(),
+                "updated_at": e.get("updated_at") or utc_now(),
             }
         else:
             # merge attributes best-effort
@@ -136,7 +136,7 @@ def _normalize_and_dedupe(
                 "confidence": confidence,
                 "quote": quote,
                 "case_id": r.get("case_id"),
-                "updated_at": r.get("updated_at") or datetime.utcnow(),
+                "updated_at": r.get("updated_at") or utc_now(),
             }
         )
 
@@ -216,7 +216,7 @@ def extract_kg_from_case(
                     "name": name,
                     "type": et,
                     "attributes": attrs,
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": utc_now(),
                 }
             )
         except Exception:
@@ -247,13 +247,13 @@ def extract_kg_from_case(
             if not se:
                 se = _entity_id(st, sn)
                 ent_map[(st, sn)] = se
-                entities.append({"id": se, "name": sn, "type": st, "attributes": {}, "updated_at": datetime.utcnow()})
+                entities.append({"id": se, "name": sn, "type": st, "attributes": {}, "updated_at": utc_now()})
 
             te = ent_map.get((tt, tn))
             if not te:
                 te = _entity_id(tt, tn)
                 ent_map[(tt, tn)] = te
-                entities.append({"id": te, "name": tn, "type": tt, "attributes": {}, "updated_at": datetime.utcnow()})
+                entities.append({"id": te, "name": tn, "type": tt, "attributes": {}, "updated_at": utc_now()})
 
             rid = _relation_id(se, rt, te, quote)
             relations.append(
@@ -265,7 +265,7 @@ def extract_kg_from_case(
                     "confidence": confidence,
                     "quote": quote,
                     "case_id": case_id,
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": utc_now(),
                 }
             )
         except Exception:

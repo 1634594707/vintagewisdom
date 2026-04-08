@@ -9,6 +9,7 @@ import hashlib
 
 from ..storage.database import Database
 from ..utils.config import Config
+from ..utils.helpers import utc_now_iso
 
 
 _NEO4J_DRIVER_CACHE: Dict[Tuple[str, str, str], Any] = {}
@@ -334,7 +335,7 @@ class Neo4jKGStore(KGStore):
         return None
 
     def upsert_entities(self, entities: List[Dict[str, Any]]) -> None:
-        now = datetime.utcnow().isoformat()
+        now = utc_now_iso()
         by_label: Dict[str, List[Dict[str, Any]]] = {}
         for e in entities:
             label = _neo_label_for_entity_type(str(e.get("type") or ""))
@@ -368,7 +369,7 @@ class Neo4jKGStore(KGStore):
                 )
 
     def upsert_relations_with_evidence(self, relations: List[Dict[str, Any]]) -> None:
-        now = datetime.utcnow().isoformat()
+        now = utc_now_iso()
         by_reltype: Dict[str, List[Dict[str, Any]]] = {}
         for r in relations:
             rid = str(r["id"])

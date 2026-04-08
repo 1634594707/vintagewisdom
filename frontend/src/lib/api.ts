@@ -1,3 +1,5 @@
+import { APIError } from './api-error';
+
 export type StatsResponse = {
   cases: number;
   decision_logs: number;
@@ -206,6 +208,64 @@ export type AIStatusResponse = {
   model: string;
 };
 
+export const FALLBACK_CASES: Case[] = [
+  {
+    id: "TEC-REF-001",
+    domain: "TEC-REF",
+    title: "SaaS platform refactor under delivery pressure",
+    description:
+      "A team with rising incident load considered a full rewrite while enterprise commitments were still increasing.",
+    decision_node: "Whether to freeze feature work and rebuild the core platform in one large move.",
+    action_taken: "Protected the legacy core, launched new modules on a cleaner architecture, and moved capabilities gradually.",
+    outcome_result: "Service quality improved without a full delivery stop. Migration was slower but much safer.",
+    outcome_timeline: "6 to 12 months",
+    lesson_core: "Prefer staged migration when technical debt is real but business continuity still matters.",
+    confidence: "high",
+    created_at: "2025-12-14",
+    updated_at: "2026-03-29",
+  },
+  {
+    id: "CAR-NEG-002",
+    domain: "CAR-NEG",
+    title: "Senior IC evaluating a high-cash offer versus long-term platform growth",
+    description:
+      "The candidate had a strong immediate offer, but the current company was entering a strategic expansion phase.",
+    decision_node: "Take the external offer now or stay for a larger but uncertain upside.",
+    action_taken: "Mapped downside scenarios, clarified role scope, and negotiated timeline flexibility before deciding.",
+    outcome_result: "Decision quality improved because the choice was framed as portfolio risk, not just compensation.",
+    outcome_timeline: "4 weeks",
+    lesson_core: "Career decisions get clearer when role leverage, learning curve, and optionality are scored together.",
+    confidence: "medium",
+    created_at: "2026-01-11",
+    updated_at: "2026-03-22",
+  },
+  {
+    id: "HIS-POL-003",
+    domain: "HIS-POL",
+    title: "Reform initiative blocked by incumbent power groups",
+    description:
+      "A reform-minded leadership group underestimated how quickly existing institutions would coordinate resistance.",
+    decision_node: "Push systemic reform immediately or build coalition capacity first.",
+    action_taken: "Chose aggressive reform sequencing before durable support was built.",
+    outcome_result: "Initial momentum was high, but implementation weakened once resistance consolidated.",
+    outcome_timeline: "12 months",
+    lesson_core: "Do not confuse policy clarity with execution capacity. Coalition readiness is part of the decision itself.",
+    confidence: "high",
+    created_at: "2026-01-07",
+    updated_at: "2026-03-18",
+  },
+];
+
+export const FALLBACK_STATS: StatsResponse = {
+  cases: 128,
+  decision_logs: 42,
+  evaluated_decision_logs: 27,
+};
+
+export function isFetchFailure(error: unknown): boolean {
+  return error instanceof Error && /fetch failed|ECONNREFUSED|ENOTFOUND|network/i.test(error.message);
+}
+
 function apiBase(): string {
   return process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000";
 }
@@ -218,8 +278,7 @@ async function fetchForm<T>(path: string, form: FormData): Promise<T> {
     cache: "no-store",
   });
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`API ${res.status} ${res.statusText}: ${text}`);
+    throw await APIError.fromResponse(res);
   }
   return (await res.json()) as T;
 }
@@ -236,8 +295,7 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`API ${res.status} ${res.statusText}: ${text}`);
+    throw await APIError.fromResponse(res);
   }
   return (await res.json()) as T;
 }
@@ -369,4 +427,153 @@ export const api = {
       method: "POST",
       body: JSON.stringify(config),
     }),
+};
+
+// ========== 标签管理 API ==========
+
+export type Tag = {
+  id: string;
+  name: string;
+  case_count: number;
+  created_at: string;
+};
+
+export type CaseTag = {
+  id: string;
+  name: string;
+  created_at: string;
+};
+
+// ========== 案例版本历史 ==========
+
+export type CaseVersion = {
+  id: number;
+  case_id: string;
+  version_number: number;
+  created_at: string;
+};
+
+// ========== 决策历史 ==========
+
+export type DecisionLog = {
+  id: string;
+  query: string;
+  context: Record<string, unknown>;
+  recommended_cases: string[];
+  user_decision?: string;
+  predicted_outcome?: string;
+  actual_outcome?: string;
+  created_at: string;
+  evaluated_at?: string;
+};
+
+// ========== 导出响应 ==========
+
+export type ExportResponse = {
+  format: string;
+  export_time: string;
+  count: number;
+  data: unknown;
+};
+
+// 扩展API对象
+export const apiExtended = {
+  ...api,
+  
+  // 标签管理
+  listTags: () => fetchJson<Tag[]>("/tags"),
+  createTag: (name: string) => 
+    fetchJson<{ id: string; name: string }>("/tags", {
+      method: "POST",
+      body: JSON.stringify(name),
+    }),
+  deleteTag: (tagId: string) =>
+    fetchJson<{ status: string; id: string }>(`/tags/${tagId}`, {
+      method: "DELETE",
+    }),
+  renameTag: (tagId: string, name: string) =>
+    fetchJson<{ status: string; id: string; name: string }>(`/tags/${tagId}`, {
+      method: "PUT",
+      body: JSON.stringify(name),
+    }),
+  addCaseTag: (caseId: string, tagId: string) =>
+    fetchJson<{ status: string }>(`/cases/${caseId}/tags/${tagId}`, {
+      method: "POST",
+    }),
+  removeCaseTag: (caseId: string, tagId: string) =>
+    fetchJson<{ status: string }>(`/cases/${caseId}/tags/${tagId}`, {
+      method: "DELETE",
+    }),
+  getCaseTags: (caseId: string) =>
+    fetchJson<CaseTag[]>(`/cases/${caseId}/tags`),
+  
+  // 案例编辑与版本历史
+  updateCase: (caseId: string, data: Partial<Case>) =>
+    fetchJson<{ status: string; id: string }>(`/cases/${caseId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  getCaseVersions: (caseId: string) =>
+    fetchJson<CaseVersion[]>(`/cases/${caseId}/versions`),
+  getCaseVersion: (caseId: string, versionNumber: number) =>
+    fetchJson<Case>(`/cases/${caseId}/versions/${versionNumber}`),
+  restoreCaseVersion: (caseId: string, versionNumber: number) =>
+    fetchJson<{ status: string }>(`/cases/${caseId}/versions/${versionNumber}/restore`, {
+      method: "POST",
+    }),
+  
+  // 批量操作
+  batchDeleteCases: (caseIds: string[]) =>
+    fetchJson<{ status: string; count: number }>("/cases/batch/delete", {
+      method: "POST",
+      body: JSON.stringify(caseIds),
+    }),
+  batchAddTags: (caseIds: string[], tagIds: string[]) =>
+    fetchJson<{ status: string; count: number }>("/cases/batch/tags/add", {
+      method: "POST",
+      body: JSON.stringify({ case_ids: caseIds, tag_ids: tagIds }),
+    }),
+  batchRemoveTags: (caseIds: string[], tagIds: string[]) =>
+    fetchJson<{ status: string; count: number }>("/cases/batch/tags/remove", {
+      method: "POST",
+      body: JSON.stringify({ case_ids: caseIds, tag_ids: tagIds }),
+    }),
+  batchExportCases: (caseIds: string[], format: "json" | "csv" = "json") =>
+    fetchJson<ExportResponse>("/cases/batch/export", {
+      method: "POST",
+      body: JSON.stringify({ case_ids: caseIds, format }),
+    }),
+  
+  // 决策历史管理
+  listDecisions: (limit: number = 100) =>
+    fetchJson<DecisionLog[]>(`/decisions/list?limit=${limit}`),
+  getDecision: (decisionId: string) =>
+    fetchJson<DecisionLog>(`/decisions/${decisionId}`),
+  deleteDecision: (decisionId: string) =>
+    fetchJson<{ status: string }>(`/decisions/${decisionId}`, {
+      method: "DELETE",
+    }),
+  searchDecisions: (query: string, limit: number = 50) =>
+    fetchJson<DecisionLog[]>(`/decisions/search?q=${encodeURIComponent(query)}&limit=${limit}`),
+  
+  // 数据导出
+  exportCases: (options?: {
+    format?: "json" | "csv" | "markdown";
+    domain?: string;
+    tags?: string;
+    start_date?: string;
+    end_date?: string;
+  }) => {
+    const params = new URLSearchParams();
+    if (options?.format) params.append("format", options.format);
+    if (options?.domain) params.append("domain", options.domain);
+    if (options?.tags) params.append("tags", options.tags);
+    if (options?.start_date) params.append("start_date", options.start_date);
+    if (options?.end_date) params.append("end_date", options.end_date);
+    return fetchJson<ExportResponse>(`/export/cases?${params.toString()}`);
+  },
+  exportDecisions: (format: "json" | "markdown" = "json") =>
+    fetchJson<ExportResponse>(`/export/decisions?format=${format}`),
+  exportGraph: () =>
+    fetchJson<ExportResponse>("/export/graph"),
 };

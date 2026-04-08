@@ -4,8 +4,11 @@ import argparse
 import csv
 import hashlib
 import json
+import re
 import time
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
@@ -15,6 +18,7 @@ from urllib.request import Request, urlopen
 from ..core.engine import Engine
 from ..models.case import Case
 from ..models.decision import DecisionLog
+from ..utils.helpers import utc_now
 from ..utils.logger import get_logger
 import yaml
 
@@ -170,6 +174,66 @@ def _build_parser() -> argparse.ArgumentParser:
         help="extract: build Case from raw text; normalize: clean/standardize existing mapped fields",
     )
 
+    ingest_dir = sub.add_parser(
+        "ingest-dir",
+        help="Batch ingest a directory (csv/json/md/pdf/docx/html/txt)",
+    )
+    ingest_dir.add_argument("--dir", required=True, help="Directory to scan")
+    ingest_dir.add_argument(
+        "--pattern",
+        default="**/*",
+        help="Glob pattern under directory (default: **/*)",
+    )
+    ingest_dir.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help="Worker threads for parsing (default: 4)",
+    )
+    ingest_dir.add_argument(
+        "--mapping",
+        default="",
+        help="Optional mapping file (YAML/JSON) for CSV/JSON column-to-field mapping",
+    )
+    ingest_dir.add_argument(
+        "--default-domain",
+        default="",
+        help="Default domain when missing in files",
+    )
+    ingest_dir.add_argument(
+        "--on-conflict",
+        choices=["skip", "replace"],
+        default="skip",
+        help="When case id already exists in DB",
+    )
+    ingest_dir.add_argument(
+        "--llm",
+        choices=["", "ollama"],
+        default="",
+        help="Optional LLM backend for cleanup/extraction during CSV import",
+    )
+    ingest_dir.add_argument(
+        "--ollama-url",
+        default="http://127.0.0.1:11434",
+        help="Ollama base URL (default: http://127.0.0.1:11434)",
+    )
+    ingest_dir.add_argument(
+        "--ollama-model",
+        default="",
+        help="Ollama model tag (e.g. qwen3.5:4b)",
+    )
+    ingest_dir.add_argument(
+        "--llm-mode",
+        choices=["extract", "normalize"],
+        default="extract",
+        help="extract: build Case from raw text; normalize: clean/standardize existing mapped fields",
+    )
+    ingest_dir.add_argument(
+        "--tabular",
+        action="store_true",
+        help="Use pandas-based normalization for CSV/JSON before mapping",
+    )
+
     ingest_doc = sub.add_parser(
         "ingest-doc",
         help="Extract text from PDF/DOCX and ingest into case database (idempotent by file sha256)",
@@ -220,6 +284,50 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _normalize_header(name: str) -> str:
     return "".join(ch for ch in name.strip().lower().replace("-", "_") if ch.isalnum() or ch == "_")
+
+
+def _normalize_ingest_value(v: Any) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v
+    if isinstance(v, (int, float, bool)):
+        return str(v)
+    if isinstance(v, (dict, list)):
+        try:
+            return json.dumps(v, ensure_ascii=False)
+        except Exception:
+            return str(v)
+    return str(v)
+
+
+def _coerce_json_cases_payload(payload: Any) -> list[dict]:
+    if isinstance(payload, list):
+        return [x for x in payload if isinstance(x, dict)]
+    if isinstance(payload, dict):
+        for key in ("cases", "items", "data", "rows"):
+            v = payload.get(key)
+            if isinstance(v, list):
+                return [x for x in v if isinstance(x, dict)]
+        return [payload]
+    return []
+
+
+def _normalize_rows_with_tabular(rows: list[dict]) -> list[dict]:
+    if not rows:
+        return rows
+    try:
+        from ..plugins.ingest_tabular import IngestTabularPlugin
+
+        plugin = IngestTabularPlugin(app=None, config={})
+        import pandas as pd  # type: ignore
+
+        df = pd.DataFrame(rows)
+        df = plugin.normalize_dataframe(df)
+        return df.to_dict(orient="records")
+    except Exception as e:
+        log.error("Tabular normalization failed, falling back: %s", e)
+        return rows
 
 
 def _load_mapping(path: str) -> Dict[str, Any]:
@@ -298,6 +406,10 @@ def _build_case_from_row(
     row: Dict[str, str],
     column_map: Dict[str, str],
     defaults: Dict[str, Any],
+    *,
+    allow_missing_id: bool = False,
+    allow_missing_domain: bool = False,
+    allow_missing_title: bool = False,
 ) -> Case:
     def get(field: str) -> str:
         col = column_map.get(field)
@@ -310,13 +422,23 @@ def _build_case_from_row(
     domain = get("domain")
     title = get("title")
     if not case_id:
-        raise ValueError("Missing required field: id")
+        if allow_missing_id:
+            raw = "\n".join(f"{k}:{(v or '').strip()}" for k, v in row.items() if (v or '').strip())
+            case_id = f"case_{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:16]}"
+        else:
+            raise ValueError("Missing required field: id")
     if not domain:
-        raise ValueError(f"Missing required field: domain (case id: {case_id})")
+        if allow_missing_domain:
+            domain = defaults.get("domain") or "general"
+        else:
+            raise ValueError(f"Missing required field: domain (case id: {case_id})")
     if not title:
-        raise ValueError(f"Missing required field: title (case id: {case_id})")
+        if allow_missing_title:
+            title = case_id
+        else:
+            raise ValueError(f"Missing required field: title (case id: {case_id})")
 
-    now = datetime.utcnow()
+    now = utc_now()
     return Case(
         id=case_id,
         domain=domain,
@@ -396,11 +518,64 @@ def _extract_document_text(path: Path, doc_type: str) -> str:
         resolved = suf
 
     if resolved == "pdf":
-        return _extract_text_from_pdf(path)
+        text = _extract_text_from_pdf(path)
+        _validate_extracted_document_text(text, path)
+        return text
     if resolved == "docx":
-        return _extract_text_from_docx(path)
+        text = _extract_text_from_docx(path)
+        _validate_extracted_document_text(text, path)
+        return text
 
     raise RuntimeError(f"Unsupported document type: {doc_type}")
+
+
+def _validate_extracted_document_text(text: str, path: Path) -> None:
+    normalized = (text or "").strip()
+    if not normalized:
+        return
+
+    suspicious_chars = sum(1 for ch in normalized if ch in {"?", "\ufffd"})
+    dense_unknowns = "????" in normalized or "\ufffd\ufffd\ufffd\ufffd" in normalized
+    suspicious_ratio = suspicious_chars / max(len(normalized), 1)
+
+    if suspicious_chars >= 8 and (dense_unknowns or suspicious_ratio >= 0.2):
+        raise RuntimeError(
+            f"Extracted text from {path.name} looks corrupted. "
+            "The source document may contain unsupported fonts/encoding or already-broken text."
+        )
+
+
+def _extract_markdown_note(raw_text: str) -> Dict[str, Any]:
+    text = (raw_text or "").replace("\r\n", "\n")
+    meta: Dict[str, Any] = {}
+    body = text
+
+    if text.startswith("---\n"):
+        end = text.find("\n---\n", 4)
+        if end != -1:
+            fm = text[4:end]
+            body = text[end + len("\n---\n") :]
+            try:
+                parsed = yaml.safe_load(fm)
+                if isinstance(parsed, dict):
+                    meta = parsed
+            except Exception:
+                meta = {}
+
+    title = str(meta.get("title") or meta.get("name") or "").strip()
+    if not title:
+        m = re.search(r"^\s*#\s+(.+?)\s*$", body, flags=re.MULTILINE)
+        if m:
+            title = m.group(1).strip()
+
+    return {"meta": meta, "title": title, "body": body.strip()}
+
+
+def _strip_html(text: str) -> str:
+    cleaned = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", text or "")
+    cleaned = re.sub(r"(?is)<[^>]+>", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip()
 
 
 def _import_csv_file(
@@ -414,7 +589,11 @@ def _import_csv_file(
     ollama_url: str,
     ollama_model: str,
     llm_mode: str,
-) -> tuple[int, int, int]:
+    use_tabular: bool = False,
+    allow_missing_id: bool = False,
+    allow_missing_domain: bool = False,
+    allow_missing_title: bool = False,
+) -> tuple[int, int, int, list[str]]:
     try:
         mapping_data = _load_mapping(mapping_path)
     except Exception as e:
@@ -428,6 +607,7 @@ def _import_csv_file(
     imported = 0
     skipped = 0
     failed = 0
+    case_ids: list[str] = []
 
     use_llm = llm == "ollama"
     if use_llm and not ollama_model:
@@ -438,7 +618,12 @@ def _import_csv_file(
         if reader.fieldnames is None:
             raise RuntimeError("CSV has no header row.")
 
-        auto_map = _auto_column_map(list(reader.fieldnames))
+        rows = [row for row in reader]
+        if use_tabular:
+            rows = _normalize_rows_with_tabular(rows)
+
+        headers = list(rows[0].keys()) if rows else list(reader.fieldnames)
+        auto_map = _auto_column_map(headers)
         user_map = mapping_data.get("columns", {}) if isinstance(mapping_data, dict) else {}
         if user_map and not isinstance(user_map, dict):
             raise RuntimeError("mapping.columns must be a dict")
@@ -448,9 +633,16 @@ def _import_csv_file(
             if isinstance(k, str) and isinstance(v, str) and v:
                 column_map[k] = v
 
-        for i, row in enumerate(reader, start=2):
+        for i, row in enumerate(rows, start=2):
             try:
-                base_case = _build_case_from_row(row, column_map=column_map, defaults=defaults)
+                base_case = _build_case_from_row(
+                    row,
+                    column_map=column_map,
+                    defaults=defaults,
+                    allow_missing_id=allow_missing_id,
+                    allow_missing_domain=allow_missing_domain,
+                    allow_missing_title=allow_missing_title,
+                )
 
                 case = base_case
                 if use_llm:
@@ -490,11 +682,179 @@ def _import_csv_file(
 
                 engine.add_case(case)
                 imported += 1
+                case_ids.append(case.id)
             except Exception as e:
                 failed += 1
                 log.error("%s row %s failed: %s", csv_path, i, e)
 
-    return imported, skipped, failed
+    return imported, skipped, failed, case_ids
+
+
+def _import_json_file(
+    *,
+    engine: Engine,
+    json_path: Path,
+    mapping_path: str,
+    default_domain: str,
+    on_conflict: str,
+    lock: threading.Lock,
+    is_jsonl: bool = False,
+    use_tabular: bool = False,
+    allow_missing_id: bool = True,
+    allow_missing_domain: bool = True,
+    allow_missing_title: bool = True,
+) -> tuple[int, int, int, list[str]]:
+    try:
+        mapping_data = _load_mapping(mapping_path)
+    except Exception as e:
+        raise RuntimeError(f"Failed to load mapping: {e}")
+
+    defaults: Dict[str, Any] = mapping_data.get("defaults", {}) if isinstance(mapping_data, dict) else {}
+    if default_domain:
+        defaults = dict(defaults)
+        defaults["domain"] = default_domain
+
+    raw_text = json_path.read_text(encoding="utf-8", errors="replace")
+    payload: list[dict]
+    if is_jsonl:
+        payload = []
+        for line in raw_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception as e:
+                raise RuntimeError(f"Invalid JSONL line: {e}")
+            if isinstance(obj, dict):
+                payload.append(obj)
+        if not payload:
+            raise RuntimeError("JSONL file is empty")
+    else:
+        payload_raw = json.loads(raw_text)
+        payload = _coerce_json_cases_payload(payload_raw)
+        if not payload:
+            raise RuntimeError("JSON must be an array of objects (or wrapped as {cases/items/data/rows: [...]})")
+
+    rows = payload
+    if use_tabular:
+        rows = _normalize_rows_with_tabular(rows)
+
+    headers: list[str] = []
+    for obj in rows:
+        if isinstance(obj, dict):
+            headers.extend([str(k) for k in obj.keys()])
+    headers = list(dict.fromkeys(headers))
+
+    auto_map = _auto_column_map(headers)
+    user_map = mapping_data.get("columns", {}) if isinstance(mapping_data, dict) else {}
+    if user_map and not isinstance(user_map, dict):
+        raise RuntimeError("mapping.columns must be a dict")
+
+    column_map = dict(auto_map)
+    for k, v in (user_map or {}).items():
+        if isinstance(k, str) and isinstance(v, str) and v:
+            column_map[k] = v
+
+    imported = 0
+    skipped = 0
+    failed = 0
+    case_ids: list[str] = []
+
+    for idx, obj in enumerate(rows, start=1):
+        try:
+            row = {str(k): _normalize_ingest_value(v) for k, v in obj.items()}
+            case = _build_case_from_row(
+                row,
+                column_map=column_map,
+                defaults=defaults,
+                allow_missing_id=allow_missing_id,
+                allow_missing_domain=allow_missing_domain,
+                allow_missing_title=allow_missing_title,
+            )
+            case_id = case.id
+            with lock:
+                if on_conflict == "skip" and engine.db.case_exists(case_id):
+                    skipped += 1
+                    continue
+                engine.add_case(case)
+            imported += 1
+            case_ids.append(case_id)
+        except Exception as e:
+            failed += 1
+            log.error("%s row %s failed: %s", json_path, idx, e)
+    return imported, skipped, failed, case_ids
+
+
+def _ingest_markdown_file(
+    *,
+    engine: Engine,
+    md_path: Path,
+    default_domain: str,
+    on_conflict: str,
+    lock: threading.Lock,
+) -> tuple[int, int, int, list[str]]:
+    raw = md_path.read_text(encoding="utf-8", errors="replace")
+    note = _extract_markdown_note(raw)
+    meta_raw = note.get("meta")
+    meta: Dict[str, Any] = meta_raw if isinstance(meta_raw, dict) else {}
+    title = str(note.get("title") or md_path.stem).strip() or md_path.stem
+    domain = str(meta.get("domain") or default_domain or "general").strip() or "general"
+    case_id = str(meta.get("id") or f"case_{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:16]}")
+
+    now = utc_now()
+    case = Case(
+        id=case_id,
+        domain=domain,
+        title=title[:300],
+        description=(note.get("body") or "")[:8000] or None,
+        decision_node=str(meta.get("decision_node") or "") or None,
+        action_taken=str(meta.get("action_taken") or "") or None,
+        outcome_result=str(meta.get("outcome_result") or "") or None,
+        outcome_timeline=str(meta.get("outcome_timeline") or "") or None,
+        lesson_core=str(meta.get("lesson_core") or "") or None,
+        confidence=str(meta.get("confidence") or "") or None,
+        created_at=now,
+        updated_at=now,
+    )
+
+    with lock:
+        if on_conflict == "skip" and engine.db.case_exists(case.id):
+            return 0, 1, 0, []
+        engine.add_case(case)
+    return 1, 0, 0, [case.id]
+
+
+def _ingest_text_file(
+    *,
+    engine: Engine,
+    file_path: Path,
+    default_domain: str,
+    on_conflict: str,
+    lock: threading.Lock,
+    is_html: bool = False,
+) -> tuple[int, int, int, list[str]]:
+    raw = file_path.read_text(encoding="utf-8", errors="replace")
+    text = _strip_html(raw) if is_html else raw.strip()
+    if not text:
+        raise RuntimeError("Empty text content")
+
+    sha = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    now = utc_now()
+    case = Case(
+        id=f"case_{sha[:16]}",
+        domain=(default_domain or "general").strip() or "general",
+        title=file_path.stem[:300],
+        description=text[:8000],
+        created_at=now,
+        updated_at=now,
+    )
+
+    with lock:
+        if on_conflict == "skip" and engine.db.case_exists(case.id):
+            return 0, 1, 0, []
+        engine.add_case(case)
+    return 1, 0, 0, [case.id]
 
 
 def _ollama_extract_case(
@@ -504,13 +864,25 @@ def _ollama_extract_case(
     raw_text: str,
 ) -> Dict[str, Any]:
     prompt = (
-        "你是一个数据清洗与信息抽取助手。\n"
-        "请从给定的原始文本中抽取一个‘决策案例 Case’，并输出严格 JSON（不要输出任何额外文本）。\n"
+        "你是一位导入整理助手，负责把原始材料整理成 VintageWisdom 可入库的“决策案例”。\n"
+        "目标不是泛泛摘要，而是提炼出一个可复用、可检索、可后续分析的案例对象。\n"
+        "请只输出严格 JSON，不要输出任何额外说明、标题、代码块或注释。\n"
         "字段要求：\n"
-        "- id: 字符串，必填。若原文没有明确 id，请生成一个稳定 id（仅用小写字母/数字/下划线），例如 case_20260315_001。\n"
-        "- domain: 字符串，必填。优先从原文推断领域；若无法判断，请使用 career。\n"
-        "- title: 字符串，必填。\n"
-        "- description/decision_node/action_taken/outcome_result/outcome_timeline/lesson_core/confidence: 字符串，可为空。\n"
+        "- id: 字符串，必填。若原文没有明确 id，请生成一个稳定 id，只允许小写字母、数字、下划线，例如 case_20260315_001。\n"
+        "- domain: 字符串，必填。优先根据材料推断；无法判断时使用 career。\n"
+        "- title: 字符串，必填。要求简洁明确，像一个能被快速识别的案例标题。\n"
+        "- description: 字符串，可为空。保留背景、约束和触发情境，不要写成空泛总结。\n"
+        "- decision_node: 字符串，可为空。提炼“当时到底在权衡什么决策”。\n"
+        "- action_taken: 字符串，可为空。写清采取了什么动作。\n"
+        "- outcome_result: 字符串，可为空。写清结果，不要只写过程。\n"
+        "- outcome_timeline: 字符串，可为空。写结果发生的大致时间窗，如“3个月”“1年内”。\n"
+        "- lesson_core: 字符串，可为空。提炼最可迁移的一条教训。\n"
+        "- confidence: 字符串，可为空。只能是 low、medium、high 之一。\n"
+        "抽取原则：\n"
+        "1. 优先保留与“决策、动作、结果、教训”最相关的信息。\n"
+        "2. 如果材料更像事件记录，也要尽量转成“人在什么情境下做了什么判断”的案例视角。\n"
+        "3. 不要臆造没有证据的细节；没有就留空。\n"
+        "4. title、decision_node、lesson_core 要可读、可复用、适合后续检索。\n"
         "domain 建议取值：tech, business, career, political, life。\n"
         "confidence 建议取值：low, medium, high。\n\n"
         "原始文本：\n"
@@ -520,7 +892,7 @@ def _ollama_extract_case(
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": "You are a precise information extraction assistant."},
+            {"role": "system", "content": "你是一位严谨的中文信息抽取助手，只返回可解析的 JSON。"},
             {"role": "user", "content": prompt},
         ],
         "stream": False,
@@ -567,7 +939,7 @@ def _merge_llm_case_fields(
             return s or None
         return str(v).strip() or None
 
-    now = datetime.utcnow()
+    now = utc_now()
     return Case(
         id=pick("id") or base.id,
         domain=pick("domain") or base.domain,
@@ -641,8 +1013,8 @@ def main(argv: list[str] | None = None) -> int:
             outcome_timeline=args.outcome_timeline or None,
             lesson_core=args.lesson_core or None,
             confidence=args.confidence or None,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=utc_now(),
+            updated_at=utc_now(),
         )
         engine.add_case(case)
         print(f"Added case {case.id}.")
@@ -655,7 +1027,7 @@ def main(argv: list[str] | None = None) -> int:
             context={"text": args.context} if args.context else {},
             user_decision=args.choice or None,
             predicted_outcome=args.predict or None,
-            created_at=datetime.utcnow(),
+            created_at=utc_now(),
             evaluated_at=None,
         )
         engine.log_decision(log_entry)
@@ -804,9 +1176,15 @@ def main(argv: list[str] | None = None) -> int:
                     status="running",
                     message=None,
                 )
+                try:
+                    from ..core.events import events
+
+                    events.emit("ingest.started", {"type": "csv", "sha256": sha, "filename": csv_path.name})
+                except Exception:
+                    pass
 
                 try:
-                    imported, skipped, failed = _import_csv_file(
+                    imported, skipped, failed, case_ids = _import_csv_file(
                         engine=engine,
                         csv_path=csv_path,
                         mapping_path=args.mapping,
@@ -830,6 +1208,15 @@ def main(argv: list[str] | None = None) -> int:
                         failed_count=failed,
                         message=None,
                     )
+                    try:
+                        from ..core.events import events
+
+                        events.emit(
+                            "ingest.completed",
+                            {"type": "csv", "sha256": sha, "case_ids": case_ids, "status": status},
+                        )
+                    except Exception:
+                        pass
                 except Exception as e:
                     engine.db.upsert_file_ingest(
                         ingest_id=ingest_id,
@@ -841,10 +1228,232 @@ def main(argv: list[str] | None = None) -> int:
                         message=str(e),
                     )
                     log.error("Import failed for %s: %s", csv_path, e)
+                    try:
+                        from ..core.events import events
+
+                        events.emit("ingest.failed", {"type": "csv", "sha256": sha, "error": str(e)})
+                    except Exception:
+                        pass
 
             if args.once:
                 return 0
             time.sleep(max(0.5, float(args.interval)))
+
+    if args.command == "ingest-dir":
+        scan_dir = Path(args.dir)
+        if not scan_dir.exists() or not scan_dir.is_dir():
+            print(f"Directory not found: {args.dir}", file=sys.stderr)
+            return 1
+
+        from ..core.events import events
+
+        pattern = args.pattern or "**/*"
+        files = [p for p in scan_dir.glob(pattern) if p.is_file()]
+        if not files:
+            print("No files matched.")
+            return 0
+
+        lock = threading.Lock()
+
+        def process_path(p: Path) -> Dict[str, Any]:
+            ext = p.suffix.lower()
+            kind = ""
+            if ext == ".csv":
+                kind = "csv"
+            elif ext in {".json", ".jsonl"}:
+                kind = "json"
+            elif ext in {".md", ".markdown"}:
+                kind = "markdown"
+            elif ext in {".pdf", ".docx"}:
+                kind = "document"
+            elif ext in {".html", ".htm"}:
+                kind = "html"
+            elif ext == ".txt":
+                kind = "text"
+            else:
+                return {"path": str(p), "status": "ignored", "reason": "unsupported"}
+
+            try:
+                sha = _sha256_file(p)
+            except Exception as e:
+                return {"path": str(p), "status": "failed", "error": str(e)}
+
+            existing = engine.db.get_file_ingest_by_sha256(sha)
+            if existing and existing.get("status") == "success":
+                return {"path": str(p), "status": "skipped", "reason": "already ingested"}
+
+            ingest_id = f"{kind}_{sha}"
+            try:
+                mtime = p.stat().st_mtime
+            except Exception:
+                mtime = None
+
+            with lock:
+                engine.db.upsert_file_ingest(
+                    ingest_id=ingest_id,
+                    source_type=kind,
+                    source_path=str(p),
+                    source_sha256=sha,
+                    source_mtime=mtime,
+                    status="running",
+                    message=None,
+                )
+            try:
+                events.emit("ingest.started", {"type": kind, "sha256": sha, "filename": p.name})
+            except Exception:
+                pass
+
+            imported = skipped = failed = 0
+            case_ids: list[str] = []
+            try:
+                if kind == "csv":
+                    imported, skipped, failed, case_ids = _import_csv_file(
+                        engine=engine,
+                        csv_path=p,
+                        mapping_path=args.mapping,
+                        default_domain=args.default_domain,
+                        on_conflict=args.on_conflict,
+                        llm=args.llm,
+                        ollama_url=args.ollama_url,
+                        ollama_model=args.ollama_model,
+                        llm_mode=args.llm_mode,
+                        use_tabular=bool(args.tabular),
+                        allow_missing_id=True,
+                        allow_missing_domain=True,
+                        allow_missing_title=True,
+                    )
+                elif kind == "json":
+                    imported, skipped, failed, case_ids = _import_json_file(
+                        engine=engine,
+                        json_path=p,
+                        mapping_path=args.mapping,
+                        default_domain=args.default_domain,
+                        on_conflict=args.on_conflict,
+                        lock=lock,
+                        is_jsonl=(p.suffix.lower() == ".jsonl"),
+                        use_tabular=bool(args.tabular),
+                    )
+                elif kind == "markdown":
+                    imported, skipped, failed, case_ids = _ingest_markdown_file(
+                        engine=engine,
+                        md_path=p,
+                        default_domain=args.default_domain,
+                        on_conflict=args.on_conflict,
+                        lock=lock,
+                    )
+                elif kind == "document":
+                    text = _extract_document_text(p, "auto")
+                    if not text:
+                        raise RuntimeError("No text extracted")
+                    sha_local = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                    now = utc_now()
+                    case = Case(
+                        id=f"case_{sha_local[:16]}",
+                        domain=(args.default_domain or "general").strip() or "general",
+                        title=p.stem[:300],
+                        description=text[:8000],
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    with lock:
+                        if args.on_conflict == "skip" and engine.db.case_exists(case.id):
+                            imported, skipped, failed = 0, 1, 0
+                        else:
+                            engine.add_case(case)
+                            imported = 1
+                    case_ids = [case.id] if imported else []
+                elif kind == "html":
+                    imported, skipped, failed, case_ids = _ingest_text_file(
+                        engine=engine,
+                        file_path=p,
+                        default_domain=args.default_domain,
+                        on_conflict=args.on_conflict,
+                        lock=lock,
+                        is_html=True,
+                    )
+                elif kind == "text":
+                    imported, skipped, failed, case_ids = _ingest_text_file(
+                        engine=engine,
+                        file_path=p,
+                        default_domain=args.default_domain,
+                        on_conflict=args.on_conflict,
+                        lock=lock,
+                        is_html=False,
+                    )
+
+                status = "success" if failed == 0 else "partial"
+                with lock:
+                    engine.db.upsert_file_ingest(
+                        ingest_id=ingest_id,
+                        source_type=kind,
+                        source_path=str(p),
+                        source_sha256=sha,
+                        source_mtime=mtime,
+                        status=status,
+                        imported_count=imported,
+                        skipped_count=skipped,
+                        failed_count=failed,
+                        message=None,
+                    )
+                try:
+                    events.emit(
+                        "ingest.completed",
+                        {"type": kind, "sha256": sha, "case_ids": case_ids, "status": status},
+                    )
+                except Exception:
+                    pass
+                return {
+                    "path": str(p),
+                    "status": status,
+                    "imported": imported,
+                    "skipped": skipped,
+                    "failed": failed,
+                }
+            except Exception as e:
+                with lock:
+                    engine.db.upsert_file_ingest(
+                        ingest_id=ingest_id,
+                        source_type=kind,
+                        source_path=str(p),
+                        source_sha256=sha,
+                        source_mtime=mtime,
+                        status="failed",
+                        imported_count=imported,
+                        skipped_count=skipped,
+                        failed_count=max(1, failed),
+                        message=str(e),
+                    )
+                try:
+                    events.emit("ingest.failed", {"type": kind, "sha256": sha, "error": str(e)})
+                except Exception:
+                    pass
+                return {"path": str(p), "status": "failed", "error": str(e)}
+
+        workers = max(1, int(args.workers or 1))
+        summaries: list[Dict[str, Any]] = []
+        if workers == 1:
+            for p in files:
+                summaries.append(process_path(p))
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futs = [pool.submit(process_path, p) for p in files]
+                for fut in as_completed(futs):
+                    try:
+                        summaries.append(fut.result())
+                    except Exception as e:
+                        summaries.append({"path": "", "status": "failed", "error": str(e)})
+
+        counts = {"success": 0, "partial": 0, "failed": 0, "skipped": 0, "ignored": 0}
+        for s in summaries:
+            status = s.get("status")
+            if status in counts:
+                counts[status] += 1
+        print(
+            "Ingest-dir summary: "
+            f"success={counts['success']} partial={counts['partial']} failed={counts['failed']} "
+            f"skipped={counts['skipped']} ignored={counts['ignored']}"
+        )
+        return 0
 
     if args.command == "ingest-doc":
         doc_path = Path(args.file)
@@ -889,7 +1498,7 @@ def main(argv: list[str] | None = None) -> int:
             if use_llm and not args.ollama_model:
                 raise RuntimeError("--ollama-model is required when --llm ollama")
 
-            now = datetime.utcnow()
+            now = utc_now()
             if use_llm:
                 llm_data = _ollama_extract_case(
                     base_url=args.ollama_url,

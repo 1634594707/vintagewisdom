@@ -5,8 +5,8 @@
 ```
 vintagewisdom/
 ├── README.md                 # 项目说明文档
-├── DESIGN.md                 # 系统设计文档
-├── STRUCTURE.md              # 本文档
+├── docs/design/UI-DESIGN.md  # 系统设计文档
+├── docs/architecture/STRUCTURE.md  # 本文档
 ├── LICENSE                   # 开源许可证
 │
 ├── pyproject.toml            # Python项目配置

@@ -32,9 +32,10 @@
 ```
 vintagewisdom/
 ├── README.md
-├── DESIGN.md
-├── STRUCTURE.md
-├── ARCHITECTURE.md          # 本文档
+├── docs/
+│   ├── design/UI-DESIGN.md
+│   ├── architecture/STRUCTURE.md
+│   └── architecture/ARCHITECTURE.md  # 本文档
 │
 ├── pyproject.toml
 ├── requirements/

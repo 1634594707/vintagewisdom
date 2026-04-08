@@ -33,6 +33,16 @@ class AIRedTeamPlugin(Plugin):
             text = str(data.get("text") or "")
             if not text.strip():
                 return
+            mode = str(self.app.config.get("plugins.config.ai.redteam.mode", "template") or "template").lower()
+            if mode == "llm":
+                return
+            if mode != "template":
+                try:
+                    engine = getattr(self.app, "engine", None)
+                    if engine and getattr(engine, "ai_assistant", None) and engine.ai_assistant.check_available():
+                        return
+                except Exception:
+                    return
             critique = self._redteam.run(text)
             if not critique:
                 return

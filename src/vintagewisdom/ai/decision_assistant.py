@@ -1,11 +1,9 @@
 """AI决策助手 - 支持本地Ollama和远程API"""
 
-import json
-import os
 from typing import Dict, List, Optional, Tuple
-import urllib.request
 
 from ..models.case import Case
+from ..core.llm import LLMService
 
 
 class AIDecisionAssistant:
@@ -17,65 +15,44 @@ class AIDecisionAssistant:
         model: str = "qwen3.5:4b",
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
+        timeout_s: int = 30,
+        retries: int = 1,
     ):
         self.provider = provider
         self.model = model
-        self.api_key = api_key or os.getenv("AI_API_KEY", "")
-        self.api_base = api_base or os.getenv("AI_API_BASE", "")
+        self.api_key = api_key
+        self.api_base = api_base
+        self._llm = LLMService(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            api_base=api_base,
+            timeout_s=timeout_s,
+            retries=retries,
+        )
     
     def _call_ollama(self, prompt: str) -> Optional[str]:
         """调用本地Ollama"""
+        if self.provider != "ollama":
+            return None
         try:
-            base_url = "http://localhost:11434"
-            data = json.dumps({
-                "model": self.model,
-                "prompt": prompt,
-                "stream": False
-            }).encode('utf-8')
-            
-            req = urllib.request.Request(
-                f"{base_url}/api/generate",
-                data=data,
-                headers={'Content-Type': 'application/json'},
-                method='POST'
-            )
-            
-            with urllib.request.urlopen(req, timeout=30) as response:
-                result = json.loads(response.read().decode('utf-8'))
-                return result.get('response', '')
+            return self._llm.generate(prompt, temperature=0.7)
         except Exception as e:
             print(f"Ollama call failed: {e}")
             return None
     
     def _call_api(self, prompt: str) -> Optional[str]:
         """调用远程API（OpenAI格式）"""
-        if not self.api_key or not self.api_base:
+        if self.provider != "api":
             return None
-        
+        if not self._llm.api_key or not self._llm.api_base:
+            return None
         try:
-            data = json.dumps({
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": "You are a decision-making assistant. Analyze cases and provide insights."},
-                    {"role": "user", "content": prompt}
-                ],
-                "temperature": 0.7,
-                "max_tokens": 1000
-            }).encode('utf-8')
-            
-            req = urllib.request.Request(
-                f"{self.api_base}/chat/completions",
-                data=data,
-                headers={
-                    'Content-Type': 'application/json',
-                    'Authorization': f'Bearer {self.api_key}'
-                },
-                method='POST'
-            )
-            
-            with urllib.request.urlopen(req, timeout=60) as response:
-                result = json.loads(response.read().decode('utf-8'))
-                return result.get('choices', [{}])[0].get('message', {}).get('content', '')
+            messages = [
+                {"role": "system", "content": "你是一位中文决策助手。请始终使用简体中文输出，内容要具体、克制、可执行。"},
+                {"role": "user", "content": prompt},
+            ]
+            return self._llm.chat(messages, temperature=0.7)
         except Exception as e:
             print(f"API call failed: {e}")
             return None
@@ -117,35 +94,35 @@ class AIDecisionAssistant:
             for i, case in enumerate(cases[:5])  # 最多5个案例
         ])
         
-        prompt = f"""You are a decision-making assistant helping analyze a current decision based on historical cases.
+        prompt = f"""你是一位中文决策助手，请基于历史案例为当前问题给出判断。
 
-Current Decision Query:
+当前问题：
 {query}
 
-Historical Cases:
+相关历史案例：
 {cases_text}
 
-Please provide:
-1. Reasoning: Analyze how these historical cases relate to the current decision. What patterns do you see? What are the key risks and opportunities?
-2. Recommendations: Provide 3-5 specific, actionable recommendations based on the lessons from these cases.
+请严格使用中文，并按下面格式输出：
 
-Format your response as:
-REASONING:
-[Your analysis here]
+分析：
+先用 2 到 4 段说明这些案例与当前问题的相似点、关键差异、主要风险和机会。
 
-RECOMMENDATIONS:
-1. [First recommendation]
-2. [Second recommendation]
-3. [Third recommendation]
-..."""
+建议：
+1. 给出 3 到 5 条具体、可执行、能落地的建议。
+2. 每条建议尽量短句表达，避免空话。
+3. 不要输出英文标题，不要输出额外说明。"""
         
         response = self._call_ai(prompt)
         
         if not response:
             # 回退到简单模板
             return (
-                f"Found {len(cases)} similar case(s). Review outcomes before deciding.",
-                ["Compare outcomes of similar cases.", "Identify key constraints and risks."]
+                f"系统找到了 {len(cases)} 个相似案例。先比较它们的结果分化，再决定当前问题更适合一次性推进，还是分阶段落地。",
+                [
+                    "先比较相似案例的最终结果，确认哪些做法真正带来了改善。",
+                    "把当前约束条件写清楚，尤其是交付压力、时间窗口和团队承受能力。",
+                    "优先选择可回退、可分阶段验证的路径，避免一次性押注。",
+                ]
             )
         
         # 解析响应
@@ -157,10 +134,10 @@ RECOMMENDATIONS:
         
         for line in lines:
             line = line.strip()
-            if line.upper().startswith('REASONING:'):
+            if line.upper().startswith('REASONING:') or line.startswith('分析：') or line.startswith('分析:'):
                 current_section = 'reasoning'
                 continue
-            elif line.upper().startswith('RECOMMENDATIONS:'):
+            elif line.upper().startswith('RECOMMENDATIONS:') or line.startswith('建议：') or line.startswith('建议:'):
                 current_section = 'recommendations'
                 continue
             
@@ -178,9 +155,9 @@ RECOMMENDATIONS:
         
         if not recommendations:
             recommendations = [
-                "Compare outcomes of similar cases.",
-                "Identify key constraints and risks.",
-                "Consider the context differences between cases."
+                "先对照相似案例的结果，避免只看过程不看结局。",
+                "把关键约束和风险写成清单，再决定优先级。",
+                "关注当前情境与历史案例之间的差异，不要生搬硬套。"
             ]
         
         return reasoning.strip(), recommendations[:5]
@@ -260,19 +237,7 @@ RECOMMENDATIONS:
     
     def check_available(self) -> bool:
         """检查AI服务是否可用"""
-        if self.provider == "ollama":
-            try:
-                req = urllib.request.Request(
-                    "http://localhost:11434/api/tags",
-                    method='GET'
-                )
-                with urllib.request.urlopen(req, timeout=5) as response:
-                    return response.status == 200
-            except:
-                return False
-        elif self.provider == "api":
-            return bool(self.api_key and self.api_base)
-        return False
+        return self._llm.check_available()
 
 
 # 全局实例
@@ -283,7 +248,9 @@ def get_ai_assistant(
     provider: str = "ollama",
     model: str = "qwen3.5:4b",
     api_key: Optional[str] = None,
-    api_base: Optional[str] = None
+    api_base: Optional[str] = None,
+    timeout_s: int = 30,
+    retries: int = 1,
 ) -> AIDecisionAssistant:
     """获取AI助手实例"""
     global _ai_assistant
@@ -292,7 +259,9 @@ def get_ai_assistant(
             provider=provider,
             model=model,
             api_key=api_key,
-            api_base=api_base
+            api_base=api_base,
+            timeout_s=timeout_s,
+            retries=retries,
         )
     return _ai_assistant
 
@@ -301,7 +270,9 @@ def update_ai_config(
     provider: str = "ollama",
     model: str = "qwen3.5:4b",
     api_key: Optional[str] = None,
-    api_base: Optional[str] = None
+    api_base: Optional[str] = None,
+    timeout_s: int = 30,
+    retries: int = 1,
 ):
     """更新AI配置"""
     global _ai_assistant
@@ -309,5 +280,7 @@ def update_ai_config(
         provider=provider,
         model=model,
         api_key=api_key,
-        api_base=api_base
+        api_base=api_base,
+        timeout_s=timeout_s,
+        retries=retries,
     )

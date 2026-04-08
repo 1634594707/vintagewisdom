@@ -11,6 +11,7 @@ from pathlib import Path
 import tempfile
 
 import yaml
+from ..utils.helpers import utc_now, utc_now_iso
 
 from fastapi import Body, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
@@ -216,7 +217,7 @@ def _build_case_from_row(
             parts.append(f"{k}: {vv}")
         desc = "\n".join(parts).strip()
 
-    now = datetime.utcnow()
+    now = utc_now()
     return {
         "id": case_id,
         "domain": domain,
@@ -271,11 +272,31 @@ def _extract_document_text(path: Path, doc_type: str) -> str:
         resolved = path.suffix.lower().lstrip(".")
 
     if resolved == "pdf":
-        return _extract_text_from_pdf(path)
+        text = _extract_text_from_pdf(path)
+        _validate_extracted_document_text(text, path)
+        return text
     if resolved == "docx":
-        return _extract_text_from_docx(path)
+        text = _extract_text_from_docx(path)
+        _validate_extracted_document_text(text, path)
+        return text
 
     raise RuntimeError(f"Unsupported document type: {doc_type}")
+
+
+def _validate_extracted_document_text(text: str, path: Path) -> None:
+    normalized = (text or "").strip()
+    if not normalized:
+        return
+
+    suspicious_chars = sum(1 for ch in normalized if ch in {"?", "\ufffd"})
+    dense_unknowns = "????" in normalized or "\ufffd\ufffd\ufffd\ufffd" in normalized
+    suspicious_ratio = suspicious_chars / max(len(normalized), 1)
+
+    if suspicious_chars >= 8 and (dense_unknowns or suspicious_ratio >= 0.2):
+        raise RuntimeError(
+            f"Extracted text from {path.name} looks corrupted. "
+            "The source document may contain unsupported fonts/encoding or already-broken text."
+        )
 
 
 def _extract_markdown_note(raw_text: str) -> Dict[str, Any]:
@@ -1035,7 +1056,7 @@ def create_app():
             meta = note.get("meta") if isinstance(note.get("meta"), dict) else {}
             body = str(note.get("body") or "")
 
-            now = datetime.utcnow()
+            now = utc_now()
             resolved_id = (case_id or "").strip() or f"case_{sha[:16]}"
 
             suggested_domains: List[str] = []
@@ -1183,7 +1204,7 @@ def create_app():
             if not text:
                 raise RuntimeError("No text extracted")
 
-            now = datetime.utcnow()
+            now = utc_now()
             resolved_id = (case_id or "").strip() or f"case_{sha[:16]}"
             
             # 自动分类
@@ -1735,7 +1756,7 @@ def create_app():
             recommended_cases=req.recommended_cases,
             user_decision=req.choice,
             predicted_outcome=req.predict,
-            created_at=datetime.utcnow(),
+            created_at=utc_now(),
             evaluated_at=None,
         )
         engine.log_decision(log_entry)
@@ -1813,6 +1834,395 @@ def create_app():
             "available": engine.ai_assistant.check_available(),
             "provider": engine.ai_assistant.provider,
             "model": engine.ai_assistant.model,
+        }
+    
+    # ========== 标签管理 API ==========
+    
+    @app.get("/tags")
+    def list_tags() -> List[Dict[str, Any]]:
+        """列出所有标签"""
+        return engine.db.list_tags()
+    
+    @app.post("/tags")
+    def create_tag(name: str = Body(...)) -> Dict[str, str]:
+        """创建新标签"""
+        tag_id = engine.db.create_tag(name)
+        return {"id": tag_id, "name": name}
+    
+    @app.delete("/tags/{tag_id}")
+    def delete_tag(tag_id: str) -> Dict[str, str]:
+        """删除标签"""
+        engine.db.delete_tag(tag_id)
+        return {"status": "deleted", "id": tag_id}
+    
+    @app.put("/tags/{tag_id}")
+    def rename_tag(tag_id: str, name: str = Body(...)) -> Dict[str, str]:
+        """重命名标签"""
+        engine.db.rename_tag(tag_id, name)
+        return {"status": "renamed", "id": tag_id, "name": name}
+    
+    @app.post("/cases/{case_id}/tags/{tag_id}")
+    def add_case_tag(case_id: str, tag_id: str) -> Dict[str, str]:
+        """为案例添加标签"""
+        engine.db.add_case_tag(case_id, tag_id)
+        return {"status": "added", "case_id": case_id, "tag_id": tag_id}
+    
+    @app.delete("/cases/{case_id}/tags/{tag_id}")
+    def remove_case_tag(case_id: str, tag_id: str) -> Dict[str, str]:
+        """从案例移除标签"""
+        engine.db.remove_case_tag(case_id, tag_id)
+        return {"status": "removed", "case_id": case_id, "tag_id": tag_id}
+    
+    @app.get("/cases/{case_id}/tags")
+    def get_case_tags(case_id: str) -> List[Dict[str, Any]]:
+        """获取案例的所有标签"""
+        return engine.db.get_case_tags(case_id)
+    
+    # ========== 案例编辑与版本历史 API ==========
+    
+    @app.put("/cases/{case_id}")
+    def update_case(case_id: str, case_data: Dict[str, Any] = Body(...)) -> Dict[str, str]:
+        """更新案例"""
+        try:
+            # 获取现有案例
+            existing_case = engine.db.get_case(case_id)
+            
+            # 更新字段
+            for key, value in case_data.items():
+                if hasattr(existing_case, key):
+                    setattr(existing_case, key, value)
+            
+            # 保存更新
+            engine.db.update_case(existing_case)
+            
+            # 触发事件以更新向量嵌入和知识图谱
+            from ..core.events import events
+            events.emit("case.updated", {"case_id": case_id})
+            
+            return {"status": "updated", "id": case_id}
+        except KeyError:
+            raise HTTPException(status_code=404, detail="case not found")
+    
+    @app.get("/cases/{case_id}/versions")
+    def get_case_versions(case_id: str) -> List[Dict[str, Any]]:
+        """获取案例版本历史"""
+        return engine.db.get_case_versions(case_id)
+    
+    @app.get("/cases/{case_id}/versions/{version_number}")
+    def get_case_version(case_id: str, version_number: int) -> Dict[str, Any]:
+        """获取特定版本的案例"""
+        case = engine.db.get_case_version(case_id, version_number)
+        if not case:
+            raise HTTPException(status_code=404, detail="version not found")
+        return case.model_dump()
+    
+    @app.post("/cases/{case_id}/versions/{version_number}/restore")
+    def restore_case_version(case_id: str, version_number: int) -> Dict[str, str]:
+        """恢复到特定版本"""
+        case = engine.db.get_case_version(case_id, version_number)
+        if not case:
+            raise HTTPException(status_code=404, detail="version not found")
+        
+        # 保存当前版本
+        try:
+            current = engine.db.get_case(case_id)
+            engine.db.save_case_version(current)
+        except KeyError:
+            pass
+        
+        # 恢复版本
+        engine.db.insert_case(case)
+        return {"status": "restored", "id": case_id, "version": version_number}
+    
+    # ========== 批量操作 API ==========
+    
+    @app.post("/cases/batch/delete")
+    def batch_delete_cases(case_ids: List[str] = Body(...)) -> Dict[str, Any]:
+        """批量删除案例"""
+        deleted = engine.db.delete_cases(case_ids)
+        
+        # 清除缓存
+        try:
+            kg_cache.invalidate_prefix("kg:")
+            kg_cache.invalidate_prefix("case:")
+        except Exception:
+            pass
+        
+        return {"status": "deleted", "count": deleted}
+    
+    @app.post("/cases/batch/tags/add")
+    def batch_add_tags(case_ids: List[str] = Body(...), tag_ids: List[str] = Body(...)) -> Dict[str, Any]:
+        """批量添加标签"""
+        added = engine.db.batch_add_tags(case_ids, tag_ids)
+        return {"status": "added", "count": added}
+    
+    @app.post("/cases/batch/tags/remove")
+    def batch_remove_tags(case_ids: List[str] = Body(...), tag_ids: List[str] = Body(...)) -> Dict[str, Any]:
+        """批量移除标签"""
+        removed = engine.db.batch_remove_tags(case_ids, tag_ids)
+        return {"status": "removed", "count": removed}
+    
+    @app.post("/cases/batch/export")
+    def batch_export_cases(
+        case_ids: List[str] = Body(...),
+        format: str = Body("json")
+    ) -> Dict[str, Any]:
+        """批量导出案例"""
+        cases = [engine.db.get_case(cid) for cid in case_ids if engine.db.case_exists(cid)]
+        
+        if format == "json":
+            return {
+                "format": "json",
+                "data": [c.model_dump() for c in cases],
+                "count": len(cases)
+            }
+        elif format == "csv":
+            # 简化的CSV格式
+            import csv
+            import io
+            output = io.StringIO()
+            if cases:
+                writer = csv.DictWriter(output, fieldnames=list(cases[0].model_dump().keys()))
+                writer.writeheader()
+                for c in cases:
+                    writer.writerow(c.model_dump())
+            return {
+                "format": "csv",
+                "data": output.getvalue(),
+                "count": len(cases)
+            }
+        else:
+            raise HTTPException(status_code=400, detail="unsupported format")
+    
+    # ========== 决策历史管理 API ==========
+    
+    @app.get("/decisions/list")
+    def list_decisions(limit: int = 100) -> List[Dict[str, Any]]:
+        """列出决策历史"""
+        return engine.db.list_decision_logs(limit)
+    
+    @app.get("/decisions/search")
+    def search_decisions(q: str = "", limit: int = 50) -> List[Dict[str, Any]]:
+        """搜索决策历史"""
+        if not q:
+            return engine.db.list_decision_logs(limit)
+        return engine.db.search_decision_logs(q, limit)
+    
+    @app.get("/decisions/{decision_id}")
+    def get_decision(decision_id: str) -> Dict[str, Any]:
+        """获取单个决策记录"""
+        decision = engine.db.get_decision_log(decision_id)
+        if not decision:
+            raise HTTPException(status_code=404, detail="decision not found")
+        return decision
+    
+    @app.delete("/decisions/{decision_id}")
+    def delete_decision(decision_id: str) -> Dict[str, str]:
+        """删除决策记录"""
+        engine.db.delete_decision_log(decision_id)
+        return {"status": "deleted", "id": decision_id}
+    
+    # ========== 数据导出 API ==========
+    
+    @app.get("/export/cases")
+    def export_cases(
+        format: str = "json",
+        domain: str = "",
+        tags: str = "",
+        start_date: str = "",
+        end_date: str = ""
+    ) -> Dict[str, Any]:
+        """导出案例数据"""
+        cases = engine.db.list_cases()
+        
+        # 应用筛选
+        if domain:
+            cases = [c for c in cases if c.domain == domain]
+        if tags:
+            tag_list = tags.split(",")
+            cases = [c for c in cases if c.tags and any(t in c.tags for t in tag_list)]
+        if start_date:
+            start = datetime.fromisoformat(start_date).date()
+            cases = [c for c in cases if c.created_at and c.created_at.date() >= start]
+        if end_date:
+            end = datetime.fromisoformat(end_date).date()
+            cases = [c for c in cases if c.created_at and c.created_at.date() <= end]
+        
+        export_time = utc_now_iso()
+        
+        if format == "json":
+            return {
+                "format": "json",
+                "export_time": export_time,
+                "count": len(cases),
+                "data": [c.model_dump() for c in cases]
+            }
+        elif format == "csv":
+            import csv
+            import io
+            output = io.StringIO()
+            if cases:
+                writer = csv.DictWriter(output, fieldnames=list(cases[0].model_dump().keys()))
+                writer.writeheader()
+                for c in cases:
+                    writer.writerow(c.model_dump())
+            return {
+                "format": "csv",
+                "export_time": export_time,
+                "count": len(cases),
+                "data": output.getvalue()
+            }
+        elif format == "markdown":
+            lines = [
+                f"# VintageWisdom 案例导出",
+                f"",
+                f"导出时间: {export_time}",
+                f"案例数量: {len(cases)}",
+                f"",
+            ]
+            for c in cases:
+                lines.extend([
+                    f"## {c.title}",
+                    f"",
+                    f"- **ID**: {c.id}",
+                    f"- **领域**: {c.domain}",
+                    f"- **置信度**: {c.confidence or 'N/A'}",
+                    f"",
+                    f"### 描述",
+                    f"{c.description or 'N/A'}",
+                    f"",
+                    f"### 决策节点",
+                    f"{c.decision_node or 'N/A'}",
+                    f"",
+                    f"### 采取行动",
+                    f"{c.action_taken or 'N/A'}",
+                    f"",
+                    f"### 结果",
+                    f"{c.outcome_result or 'N/A'}",
+                    f"",
+                    f"### 核心教训",
+                    f"{c.lesson_core or 'N/A'}",
+                    f"",
+                    f"---",
+                    f"",
+                ])
+            return {
+                "format": "markdown",
+                "export_time": export_time,
+                "count": len(cases),
+                "data": "\n".join(lines)
+            }
+        else:
+            raise HTTPException(status_code=400, detail="unsupported format")
+    
+    @app.get("/export/decisions")
+    def export_decisions(format: str = "json") -> Dict[str, Any]:
+        """导出决策历史"""
+        decisions = engine.db.list_decision_logs(limit=1000)
+        export_time = utc_now_iso()
+        
+        if format == "json":
+            return {
+                "format": "json",
+                "export_time": export_time,
+                "count": len(decisions),
+                "data": decisions
+            }
+        elif format == "markdown":
+            lines = [
+                f"# VintageWisdom 决策历史导出",
+                f"",
+                f"导出时间: {export_time}",
+                f"决策数量: {len(decisions)}",
+                f"",
+            ]
+            for d in decisions:
+                lines.extend([
+                    f"## 决策: {d['id']}",
+                    f"",
+                    f"- **查询时间**: {d['created_at']}",
+                    f"- **评估时间**: {d.get('evaluated_at') or 'N/A'}",
+                    f"",
+                    f"### 查询内容",
+                    f"{d['query']}",
+                    f"",
+                    f"### 推荐案例",
+                    f"{', '.join(d.get('recommended_cases', []))}",
+                    f"",
+                    f"### 用户决策",
+                    f"{d.get('user_decision') or 'N/A'}",
+                    f"",
+                    f"### 预测结果",
+                    f"{d.get('predicted_outcome') or 'N/A'}",
+                    f"",
+                    f"### 实际结果",
+                    f"{d.get('actual_outcome') or 'N/A'}",
+                    f"",
+                    f"---",
+                    f"",
+                ])
+            return {
+                "format": "markdown",
+                "export_time": export_time,
+                "count": len(decisions),
+                "data": "\n".join(lines)
+            }
+        else:
+            raise HTTPException(status_code=400, detail="unsupported format")
+    
+    @app.get("/export/graph")
+    def export_graph() -> Dict[str, Any]:
+        """导出知识图谱"""
+        # 获取完整图谱数据
+        graph_data = graph(view="case", max_cases_for_similarity=500, max_similar_edges=200)
+        export_time = utc_now_iso()
+        
+        return {
+            "format": "json",
+            "export_time": export_time,
+            "data": graph_data
+        }
+    
+    # ========== 异步任务 API ==========
+    
+    @app.get("/tasks/{task_id}")
+    def get_task_status(task_id: str) -> Dict[str, Any]:
+        """获取异步任务状态"""
+        task = engine.db.get_async_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="task not found")
+        
+        # 计算进度百分比
+        total = task.get("total_cases", 0)
+        processed = task.get("processed_cases", 0)
+        progress_percent = int((processed / total * 100) if total > 0 else 0)
+        
+        # 计算阶段进度
+        stage_done = task.get("stage_done", 0)
+        stage_total = task.get("stage_total", 0)
+        overall_percent = progress_percent
+        
+        if stage_total and stage_total > 0:
+            stage_percent = int((stage_done / stage_total * 100))
+            # 综合进度 = 案例进度 * 0.7 + 阶段进度 * 0.3
+            overall_percent = int(progress_percent * 0.7 + stage_percent * 0.3)
+        
+        return {
+            "task_id": task["task_id"],
+            "status": task["status"],
+            "total_cases": total,
+            "processed_cases": processed,
+            "stage": task.get("stage"),
+            "stage_done": stage_done,
+            "stage_total": stage_total,
+            "overall_percent": overall_percent,
+            "current_case": task.get("current_case"),
+            "current_action": task.get("current_action"),
+            "progress_percent": progress_percent,
+            "result": task.get("result"),
+            "error_message": task.get("error_message"),
+            "created_at": task["created_at"],
+            "updated_at": task["updated_at"]
         }
 
     return app

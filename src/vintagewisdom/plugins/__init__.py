@@ -4,10 +4,13 @@ __all__ = [
     "kg_extract",
     "ai_classify",
     "ingest_events",
+    "ingest_tabular",
     "storage_sqlite",
     "search_basic",
     "nlp_basic",
     "ai_redteam",
+    "ai_redteam_llm",
     "bias_detector",
     "ai_reasoning",
+    "evidence_builder",
 ]

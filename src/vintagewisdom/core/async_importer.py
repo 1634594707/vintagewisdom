@@ -5,11 +5,11 @@
 import threading
 import json
 import hashlib
-from datetime import datetime
 from typing import Dict, List, Optional, Callable
 from pathlib import Path
 
 from ..utils.config import Config
+from ..utils.helpers import utc_now
 
 from ..storage.task_store import get_task_store
 from ..storage.database import Database
@@ -176,7 +176,7 @@ class AsyncImporter:
     
     def _build_case(self, case_data: Dict, default_domain: str) -> Case:
         """构建案例对象"""
-        now = datetime.utcnow()
+        now = utc_now()
         
         # 生成 ID
         case_id = case_data.get('id', '')

@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+
 import AppShell from "@/components/AppShell";
+import { FieldGroup, MetricCard, NoticeBanner, PanelBlock, SectionIntro } from "@/components/ui/workspace";
 import { api } from "@/lib/api";
 
 export default function SettingsPage() {
@@ -20,40 +22,21 @@ export default function SettingsPage() {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    // 加载当前配置
-    api.getAIConfig()
-      .then((config) => {
-        setAiConfig((prev) => ({
-          ...prev,
-          provider: config.provider || "ollama",
-          model: config.model || "qwen3.5:4b",
-          api_base: config.api_base || "",
-        }));
-      })
-      .catch((e) => {
-        console.error("Failed to load AI config:", e);
-        // 使用默认配置
-        setAiConfig((prev) => ({
-          ...prev,
-          provider: "ollama",
-          model: "qwen3.5:4b",
-        }));
-      });
+    api.getAIConfig().then((config) => {
+      setAiConfig((prev) => ({
+        ...prev,
+        provider: config.provider || "ollama",
+        model: config.model || "qwen3.5:4b",
+        api_base: config.api_base || "",
+      }));
+    }).catch((e) => console.error("Failed to load AI config:", e));
 
-    // 检查AI状态
-    api.getAIStatus()
-      .then((status) => {
-        setAiStatus(status);
-      })
-      .catch((e) => {
-        console.error("Failed to load AI status:", e);
-        // 设置为不可用
-        setAiStatus({
-          available: false,
-          provider: "ollama",
-          model: "qwen3.5:4b",
-        });
-      });
+    api.getAIStatus().then((status) => {
+      setAiStatus(status);
+    }).catch((e) => {
+      console.error("Failed to load AI status:", e);
+      setAiStatus({ available: false, provider: "ollama", model: "qwen3.5:4b" });
+    });
   }, []);
 
   const handleSave = async () => {
@@ -61,160 +44,112 @@ export default function SettingsPage() {
     setMessage("");
     try {
       await api.updateAIConfig(aiConfig);
-      setMessage("配置已保存");
-      // 刷新状态
+      setMessage("配置已保存。");
       const status = await api.getAIStatus();
       setAiStatus(status);
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "保存失败");
+      setMessage(e instanceof Error ? e.message : "保存失败。");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <AppShell title="设置">
-      <div className="max-w-2xl space-y-6">
-        {/* AI配置 */}
-        <div className="rounded-lg border border-[color:var(--bg-tertiary)] bg-[var(--bg-secondary)] p-6">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-medium">AI 配置</h2>
-            <div className="flex items-center gap-2">
-              <span
-                className={`h-2 w-2 rounded-full ${
-                  aiStatus.available ? "bg-green-500" : "bg-red-500"
-                }`}
-              />
-              <span className="text-xs text-[var(--text-muted)]">
-                {aiStatus.available ? "服务正常" : "服务不可用"}
-              </span>
+    <AppShell title="系统设置">
+      <div className="space-y-4">
+        <SectionIntro
+          eyebrow="AI 运行层"
+          title="模型与服务连通性"
+          description="统一管理查询、自动分类和推理链路所使用的模型运行时，让整套判断系统保持稳定和可验证。"
+          aside={
+            <div className={`rounded-full px-4 py-2 text-sm ${aiStatus.available ? "border border-[color:rgba(34,197,94,0.28)] bg-[rgba(34,197,94,0.12)] text-[var(--success)]" : "border border-[color:rgba(239,68,68,0.28)] bg-[rgba(239,68,68,0.12)] text-[var(--error)]"}`}>
+              {aiStatus.available ? "服务在线" : "服务离线"}
             </div>
-          </div>
+          }
+        />
+
+        <section className="grid gap-4 md:grid-cols-3">
+          <MetricCard label="当前提供方" value={aiStatus.provider || aiConfig.provider} hint="正在使用的执行后端" />
+          <MetricCard label="默认模型" value={aiStatus.model || aiConfig.model} hint="当前主模型目标" />
+          <MetricCard label="连通状态" value={aiStatus.available ? "在线" : "离线"} hint="实时可用性" accent={aiStatus.available ? "var(--success)" : "var(--error)"} />
+        </section>
+
+        {message ? (
+          <NoticeBanner tone={message.includes("失败") || message.toLowerCase().includes("error") ? "error" : "success"}>
+            {message}
+          </NoticeBanner>
+        ) : null}
+
+        <section className="grid gap-4 xl:grid-cols-[1fr_0.8fr]">
+          <PanelBlock eyebrow="配置面板" title="AI 提供方设置">
+            <div className="space-y-4">
+              <FieldGroup label="提供方">
+                <select value={aiConfig.provider} onChange={(e) => setAiConfig({ ...aiConfig, provider: e.target.value })} className="vw-select h-11 rounded-2xl px-4 text-sm">
+                  <option value="ollama">本地 Ollama</option>
+                  <option value="api">远程 API</option>
+                </select>
+              </FieldGroup>
+
+              <FieldGroup label="模型名称" hint={aiConfig.provider === "ollama" ? "例如：qwen3.5:4b、deepseek-r1:7b" : "例如：gpt-4.1、gpt-4o-mini"}>
+                <input type="text" value={aiConfig.model} onChange={(e) => setAiConfig({ ...aiConfig, model: e.target.value })} className="vw-input h-11 rounded-2xl px-4 text-sm" />
+              </FieldGroup>
+
+              {aiConfig.provider === "api" ? (
+                <>
+                  <FieldGroup label="API Base URL" hint="例如：https://api.openai.com/v1">
+                    <input type="text" value={aiConfig.api_base} onChange={(e) => setAiConfig({ ...aiConfig, api_base: e.target.value })} className="vw-input h-11 rounded-2xl px-4 text-sm" />
+                  </FieldGroup>
+                  <FieldGroup label="API Key" hint="仅用于本地运行时，不会展示给其他用户。">
+                    <input type="password" value={aiConfig.api_key} onChange={(e) => setAiConfig({ ...aiConfig, api_key: e.target.value })} placeholder="sk-..." className="vw-input h-11 rounded-2xl px-4 text-sm" />
+                  </FieldGroup>
+                </>
+              ) : null}
+
+              <div className="flex flex-wrap items-center gap-3 pt-2">
+                <button type="button" onClick={handleSave} disabled={loading} className="vw-btn-primary px-5 py-2.5 text-sm font-medium disabled:opacity-60">
+                  {loading ? "保存中..." : "保存配置"}
+                </button>
+              </div>
+            </div>
+          </PanelBlock>
 
           <div className="space-y-4">
-            {/* 提供商选择 */}
-            <div>
-              <label className="mb-1 block text-sm text-[var(--text-muted)]">
-                AI 提供商
-              </label>
-              <select
-                value={aiConfig.provider}
-                onChange={(e) =>
-                  setAiConfig({ ...aiConfig, provider: e.target.value })
-                }
-                className="w-full rounded-md border border-[color:var(--bg-tertiary)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[color:var(--accent-primary)]"
-              >
-                <option value="ollama">本地 Ollama</option>
-                <option value="api">远程 API (OpenAI格式)</option>
-              </select>
-            </div>
+            <PanelBlock eyebrow="运行状态" title="服务健康度">
+              <div className="mt-4 space-y-3">
+                <StatusRow label="提供方" value={aiStatus.provider || aiConfig.provider} />
+                <StatusRow label="模型" value={aiStatus.model || aiConfig.model} />
+                <StatusRow label="可用性" value={aiStatus.available ? "在线" : "离线"} />
+              </div>
+            </PanelBlock>
 
-            {/* 模型 */}
-            <div>
-              <label className="mb-1 block text-sm text-[var(--text-muted)]">
-                模型名称
-              </label>
-              <input
-                type="text"
-                value={aiConfig.model}
-                onChange={(e) =>
-                  setAiConfig({ ...aiConfig, model: e.target.value })
-                }
-                placeholder={
-                  aiConfig.provider === "ollama"
-                    ? "如: qwen3.5:4b, deepseek-r1:7b"
-                    : "如: gpt-4, gpt-3.5-turbo"
-                }
-                className="w-full rounded-md border border-[color:var(--bg-tertiary)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[color:var(--accent-primary)]"
-              />
-              <p className="mt-1 text-xs text-[var(--text-muted)]">
-                {aiConfig.provider === "ollama"
-                  ? "使用 ollama list 查看可用模型"
-                  : "填写API提供商支持的模型名称"}
-              </p>
-            </div>
-
-            {/* API配置（仅在API模式下显示） */}
-            {aiConfig.provider === "api" && (
-              <>
-                <div>
-                  <label className="mb-1 block text-sm text-[var(--text-muted)]">
-                    API Base URL
-                  </label>
-                  <input
-                    type="text"
-                    value={aiConfig.api_base}
-                    onChange={(e) =>
-                      setAiConfig({ ...aiConfig, api_base: e.target.value })
-                    }
-                    placeholder="https://api.openai.com/v1"
-                    className="w-full rounded-md border border-[color:var(--bg-tertiary)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[color:var(--accent-primary)]"
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-sm text-[var(--text-muted)]">
-                    API Key
-                  </label>
-                  <input
-                    type="password"
-                    value={aiConfig.api_key}
-                    onChange={(e) =>
-                      setAiConfig({ ...aiConfig, api_key: e.target.value })
-                    }
-                    placeholder="sk-..."
-                    className="w-full rounded-md border border-[color:var(--bg-tertiary)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[color:var(--accent-primary)]"
-                  />
-                  <p className="mt-1 text-xs text-[var(--text-muted)]">
-                    API密钥仅保存在本地，不会上传到服务器
-                  </p>
-                </div>
-              </>
-            )}
-
-            {/* 保存按钮 */}
-            <div className="flex items-center gap-3 pt-2">
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={loading}
-                className="rounded-md bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--accent-hover)] disabled:opacity-50"
-              >
-                {loading ? "保存中..." : "保存配置"}
-              </button>
-              {message && (
-                <span
-                  className={`text-sm ${
-                    message.includes("失败") || message.includes("错误")
-                      ? "text-red-400"
-                      : "text-green-400"
-                  }`}
-                >
-                  {message}
-                </span>
-              )}
-            </div>
+            <PanelBlock eyebrow="操作提示" title="使用建议">
+              <div className="mt-4 space-y-3 text-sm leading-6 text-[var(--text-secondary)]">
+                <NoteItem title="本地 Ollama" description="适合离线和隐私优先场景，不需要 API Key，但本地模型服务必须保持运行。" />
+                <NoteItem title="远程 API" description="适合需要更强托管模型时使用，务必同时确保 Base URL 与凭证正确。" />
+                <NoteItem title="即时生效" description="保存后，新发起的查询和自动分类任务会立刻使用最新配置。" />
+              </div>
+            </PanelBlock>
           </div>
-        </div>
-
-        {/* 说明 */}
-        <div className="rounded-lg border border-[color:var(--bg-tertiary)] bg-[var(--bg-secondary)] p-6">
-          <h2 className="mb-4 text-lg font-medium">使用说明</h2>
-          <div className="space-y-2 text-sm text-[var(--text-secondary)]">
-            <p>
-              <strong className="text-[var(--text-primary)]">本地 Ollama:</strong>{" "}
-              需要在本地运行 Ollama 服务，支持离线使用，无需API密钥。
-            </p>
-            <p>
-              <strong className="text-[var(--text-primary)]">远程 API:</strong>{" "}
-              支持OpenAI格式的API，如OpenAI、Azure OpenAI、第三方代理等。
-            </p>
-            <p className="text-xs text-[var(--text-muted)]">
-              配置更改后会立即生效，用于决策查询和自动分类功能。
-            </p>
-          </div>
-        </div>
+        </section>
       </div>
     </AppShell>
+  );
+}
+
+function StatusRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between rounded-2xl border border-[color:var(--border-subtle)] bg-[#f8f9fa] px-4 py-3">
+      <span className="text-sm text-[var(--text-muted)]">{label}</span>
+      <span className="vw-mono text-sm text-[var(--text-secondary)]">{value}</span>
+    </div>
+  );
+}
+
+function NoteItem({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="rounded-2xl border border-[color:var(--border-subtle)] bg-[#f8f9fa] p-4">
+      <div className="font-medium text-[var(--text-primary)]">{title}</div>
+      <div className="mt-1 text-sm text-[var(--text-muted)]">{description}</div>
+    </div>
   );
 }

@@ -18,7 +18,7 @@ class Retriever:
         2. 语义相似度（通过AI）
         3. 领域匹配
         """
-        candidates = self.db.list_cases()
+        candidates = [case for case in self.db.list_cases() if not self._is_test_case(case)]
         if not candidates:
             return []
         
@@ -71,6 +71,18 @@ class Retriever:
         # 按分数排序
         scored.sort(key=lambda item: item[0], reverse=True)
         return [case for _, case in scored[:top_k]]
+
+    def _is_test_case(self, case: Case) -> bool:
+        case_id = (case.id or "").strip().lower()
+        title = (case.title or "").strip().lower()
+        description = (case.description or "").strip().lower()
+        return (
+            case_id.startswith("case_test_")
+            or case_id.startswith("test-")
+            or title == "test case"
+            or title.startswith("测试案例")
+            or description == "just a test"
+        )
     
     def _semantic_match(self, query: str, candidates: List[Case]) -> List[tuple[float, Case]]:
         """使用AI进行语义匹配"""
